@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>전주 LiDAR → 표면 메시 (A: pymeshlab Poisson)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e13; }
+  #hud { position: fixed; top: 8px; left: 10px; color: #9f9; font: 12px/1.5 monospace;
+         background: rgba(0,0,0,.55); padding: 6px 10px; border-radius: 6px; z-index: 10; }
+  #ctl { position: fixed; bottom: 10px; left: 10px; color: #ccc; font: 12px monospace;
+         background: rgba(0,0,0,.55); padding: 6px 10px; border-radius: 6px; z-index: 10; }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "./node_modules/three/build/three.module.js",
+    "three/addons/": "./node_modules/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="hud">표면 메시 로딩 중…</div>
+<div id="ctl">
+  <label><input id="wire" type="checkbox"> 와이어프레임</label> ·
+  <label><input id="flat" type="checkbox"> 음영만(색 끄기)</label>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const hud = document.getElementById('hud');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio * 1.5, 2));
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0e13);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 100000);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+
+// 조명: 하늘광 + 태양광(메시 입체감)
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x40403a, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(1, 2, 1.5); scene.add(sun);
+
+const ply = (new URLSearchParams(location.search)).get('ply') || 'jeonju_mesh.ply';
+const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0.0, flatShading: false });
+
+new PLYLoader().load(ply, (geo) => {
+  if (!geo.attributes.normal) geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotateX(-Math.PI / 2);   // Z-up → Y-up
+  scene.add(mesh);
+  const box = new THREE.Box3().setFromObject(mesh);
+  const c = new THREE.Vector3(); box.getCenter(c);
+  const s = new THREE.Vector3(); box.getSize(s);
+  const d = Math.max(s.x, s.z);
+  controls.target.copy(c);
+  camera.position.set(c.x, c.y + d * 0.6, c.z + d * 0.8);
+  camera.far = d * 20; camera.updateProjectionMatrix();
+  hud.textContent = `전주 LiDAR → 표면 메시 (A) · ${geo.attributes.position.count.toLocaleString()} verts · 솔리드 음영\n드래그=회전 휠=줌`;
+}, (e) => { if (e.lengthComputable) hud.textContent = `로딩 ${(e.loaded / e.total * 100).toFixed(0)}%`; },
+   (err) => { hud.textContent = '로드 실패: ' + err; });
+
+document.getElementById('wire').onchange = (e) => { mat.wireframe = e.target.checked; };
+document.getElementById('flat').onchange = (e) => { mat.vertexColors = !e.target.checked; mat.color.set(0xcfd2d6); mat.needsUpdate = true; };
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+(function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+</script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+# ── 대용량 원본/생성 데이터 (스크립트로 재생성, 리포에 미포함) ──
+/data/
+/output/
+/tools/
+
+# ── viewer: 의존성·벤더·대용량 산출물 ──
+viewer/node_modules/
+viewer/libs/
+viewer/build/
+viewer/pointclouds/
+
+# ── 지도 타일 / 포인트클라우드 / 메시 / 텍스처 (대용량 바이너리) ──
+*.pmtiles
+*.ply
+*.las
+*.laz
+*.f32
+*.u8
+*.glb
+*.obj
+*.png
+*.geojson
+*.tif
+*.tiff
+
+# ── 비밀/환경 ──
+.env
+*.pgpass
+.aihub/
+
+# ── OS / 에디터 / 파이썬 ──
+.DS_Store
+*.swp
+*.swo
+__pycache__/
+*.pyc
+.idea/
+.vscode/

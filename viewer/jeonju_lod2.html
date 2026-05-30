@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>전주 LOD2 건물 (City3D 지붕형상)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e13; }
+  #hud { position: fixed; top: 8px; left: 10px; color: #9f9; font: 12px/1.5 monospace;
+         background: rgba(0,0,0,.55); padding: 6px 10px; border-radius: 6px; z-index: 10; }
+  #ctl { position: fixed; bottom: 10px; left: 10px; color: #ccc; font: 12px monospace;
+         background: rgba(0,0,0,.55); padding: 6px 10px; border-radius: 6px; z-index: 10; }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "./node_modules/three/build/three.module.js",
+    "three/addons/": "./node_modules/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="hud">LOD2 건물 로딩 중…</div>
+<div id="ctl"><label><input id="pts" type="checkbox"> LiDAR 점군 겹쳐보기</label></div>
+<script type="module">
+import * as THREE from 'three';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const hud = document.getElementById('hud');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio * 1.5, 2));
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0e13);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 100000);
+const controls = new OrbitControls(camera, renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x33332e, 1.0));
+const sun = new THREE.DirectionalLight(0xffffff, 1.8); sun.position.set(1, 2, 1.2); scene.add(sun);
+
+const group = new THREE.Group(); group.rotateX(-Math.PI / 2); scene.add(group);  // Z-up→Y-up
+
+new OBJLoader().load('jeonju_lod2.obj', (obj) => {
+  const mat = new THREE.MeshStandardMaterial({ color: 0xd8c8a8, roughness: 0.9, metalness: 0.0, flatShading: true });
+  let nv = 0;
+  obj.traverse((c) => { if (c.isMesh) { c.material = mat; c.geometry.computeVertexNormals(); nv += c.geometry.attributes.position.count; } });
+  group.add(obj);
+  const box = new THREE.Box3().setFromObject(group);
+  const ctr = new THREE.Vector3(); box.getCenter(ctr);
+  const sz = new THREE.Vector3(); box.getSize(sz);
+  const d = Math.max(sz.x, sz.z);
+  controls.target.copy(ctr);
+  camera.position.set(ctr.x + d * 0.4, ctr.y + d * 0.5, ctr.z + d * 0.6);
+  camera.far = d * 20; camera.updateProjectionMatrix();
+  hud.textContent = `전주 LOD2 건물 (City3D 지붕형상) · OSM 풋프린트 + LiDAR 높이\n드래그=회전 휠=줌`;
+}, undefined, (e) => hud.textContent = 'OBJ 로드 실패: ' + e);
+
+// LiDAR 점군 토글(컨텍스트)
+let cloud = null;
+document.getElementById('pts').onchange = (e) => {
+  if (e.target.checked && !cloud) {
+    new PLYLoader().load('jeonju_0024.ply', (geo) => {
+      cloud = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.6, vertexColors: true }));
+      group.add(cloud);
+    });
+  } else if (cloud) { cloud.visible = e.target.checked; }
+};
+
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+(function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+</script>
+</body>
+</html>

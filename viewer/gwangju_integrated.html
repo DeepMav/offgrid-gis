@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>martin 통합: 로컬 베이스맵 + PostGIS 건물 (광주)</title>
+<link href="./node_modules/maplibre-gl/dist/maplibre-gl.css" rel="stylesheet" />
+<style>
+  html, body, #map { margin: 0; height: 100%; width: 100%; }
+  #hud { position: fixed; top: 8px; left: 10px; z-index: 5; color: #036; font: 12px/1.5 monospace;
+         background: rgba(255,255,255,.9); padding: 6px 10px; border-radius: 6px; }
+  #attr { position: fixed; bottom: 0; right: 0; z-index: 5; font: 10px sans-serif; color: #333; background: rgba(255,255,255,.7); padding: 2px 6px; }
+</style>
+<script src="./node_modules/maplibre-gl/dist/maplibre-gl.js"></script>
+</head>
+<body>
+<div id="map"></div>
+<div id="hud">martin 통합 (베이스맵 PMTiles + PostGIS 건물) · 로딩 중…</div>
+<div id="attr">© OpenMapTiles © OpenStreetMap contributors</div>
+<script>
+const hud = document.getElementById("hud");
+window.addEventListener("error", (e) => hud.innerHTML = "❌ " + e.message);
+const M = "http://localhost:3001";   // martin 맵서버 (PMTiles + PostGIS 통합)
+const roadW = ["interpolate", ["linear"], ["zoom"], 6, 0.4, 12, 2, 16, 8];
+
+const style = {
+  version: 8,
+  sources: {
+    km:  { type: "vector", url: M + "/korea" },                 // 베이스맵 (PMTiles)
+    bld: { type: "vector", url: M + "/gwangju_buildings" }      // 건물 (PostGIS, 동적)
+  },
+  light: { anchor: "viewport", intensity: 0.45, position: [1.2, 90, 40] },
+  layers: [
+    { id: "bg", type: "background", paint: { "background-color": "#f6f4ef" } },
+    { id: "landcover", type: "fill", source: "km", "source-layer": "landcover", paint: { "fill-color": ["match", ["get","class"], "wood","#cfe0c2","grass","#dcebcf","#e3e9da"], "fill-opacity": 0.6 } },
+    { id: "landuse", type: "fill", source: "km", "source-layer": "landuse", paint: { "fill-color": "#eceae3", "fill-opacity": 0.5 } },
+    { id: "water", type: "fill", source: "km", "source-layer": "water", paint: { "fill-color": "#a3c9ef" } },
+    { id: "road-minor", type: "line", source: "km", "source-layer": "transportation",
+      filter: ["in", ["get","class"], ["literal",["minor","service","track","path"]]],
+      paint: { "line-color": "#ffffff", "line-width": ["interpolate",["linear"],["zoom"],13,0.5,16,3] } },
+    { id: "road-main", type: "line", source: "km", "source-layer": "transportation",
+      filter: ["in", ["get","class"], ["literal",["secondary","tertiary","primary","trunk","motorway"]]],
+      paint: { "line-color": ["match",["get","class"],"motorway","#f7b27a","trunk","#f9c79a","#ffffff"], "line-width": roadW } },
+    // 남한 전역 건물 (PMTiles 베이스맵 building 레이어, OSM 추정높이)
+    { id: "korea-3d", type: "fill-extrusion", source: "km", "source-layer": "building", minzoom: 13,
+      paint: {
+        "fill-extrusion-color": "#d8d2c6",
+        "fill-extrusion-height": ["coalesce", ["get","render_height"], 6],
+        "fill-extrusion-base": ["coalesce", ["get","render_min_height"], 0],
+        "fill-extrusion-opacity": 0.9
+      } },
+    // 광주: PostGIS LiDAR-높이 건물 (강조, 위에 겹침)
+    { id: "gwangju-3d", type: "fill-extrusion", source: "bld", "source-layer": "gwangju_buildings", minzoom: 12,
+      paint: {
+        "fill-extrusion-color": ["interpolate",["linear"],["get","height"], 3,"#7fd6c8", 15,"#3fb0c8", 40,"#2a78b0"],
+        "fill-extrusion-height": ["get","height"],
+        "fill-extrusion-base": 0,
+        "fill-extrusion-opacity": 0.95
+      } }
+  ]
+};
+
+const map = new maplibregl.Map({ container: "map", style, center: [126.8564, 35.1345], zoom: 14.2, pitch: 58, bearing: 12, maxPitch: 85, maxZoom: 18 });
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
+map.on("error", (e) => { if (e && e.error) hud.innerHTML = "map.error: " + e.error.message; });
+map.on("load", () => { hud.innerHTML = "martin 통합 서빙 ✅<br>베이스맵=자체 PMTiles · 건물=PostGIS(708동, 높이별 색) · 단일 맵서버"; });
+</script>
+</body>
+</html>

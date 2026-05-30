@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>전주 LiDAR × 2D 맵서버 통합 (MapLibre + deck.gl)</title>
+<link href="./node_modules/maplibre-gl/dist/maplibre-gl.css" rel="stylesheet" />
+<style>
+  html, body, #map { margin: 0; height: 100%; width: 100%; }
+  #hud { position: fixed; top: 8px; left: 10px; z-index: 5; color: #036; font: 12px/1.5 monospace;
+         background: rgba(255,255,255,.85); padding: 6px 10px; border-radius: 6px; }
+  #ctl { position: fixed; bottom: 12px; left: 10px; z-index: 5; background: rgba(255,255,255,.9);
+         padding: 8px 10px; border-radius: 6px; font: 12px monospace; }
+</style>
+<script src="./node_modules/maplibre-gl/dist/maplibre-gl.js"></script>
+<script src="./node_modules/pmtiles/dist/pmtiles.js"></script>
+<script src="./node_modules/deck.gl/dist.min.js"></script>
+</head>
+<body>
+<div id="map"></div>
+<div id="hud">전주 항공 LiDAR (AI Hub 474) × OSM 베이스맵(PMTiles)<br>로딩 중…</div>
+<div id="ctl">
+  점 크기 <input id="sz" type="range" min="0.5" max="5" step="0.5" value="1.5"> <span id="szv">1.5</span>px ·
+  점군 <input id="vis" type="checkbox" checked> ·
+  <span style="color:#888">우클릭드래그=기울이기/회전</span>
+</div>
+<script>
+const hud = document.getElementById("hud");
+function fail(where, e) {
+  const msg = (e && (e.message || e.error || e)) + "";
+  hud.innerHTML = "❌ " + where + ":<br>" + msg;
+  console.error(where, e);
+}
+window.addEventListener("error", (e) => fail("window.error", e));
+window.addEventListener("unhandledrejection", (e) => fail("promise", e.reason));
+
+// 1) PMTiles 프로토콜 등록 (우리 서버의 jeonju_basemap.pmtiles)
+const protocol = new pmtiles.Protocol({ metadata: true });   // 벡터 소스: TileJSON에 vector_layers 포함 필수
+maplibregl.addProtocol("pmtiles", protocol.tile);
+
+const C = [127.138406, 35.816988];   // 점군/지도 중심 (WGS84)
+const PM = "pmtiles://" + location.origin + "/jeonju_basemap.pmtiles";
+
+// 2) Protomaps v4 스키마 최소 스타일
+const style = {
+  version: 8, sources: {
+    base: { type: "vector", url: PM, attribution: "© OpenStreetMap" }
+  },
+  layers: [
+    { id: "bg", type: "background", paint: { "background-color": "#f3f1ec" } },
+    { id: "earth", type: "fill", source: "base", "source-layer": "earth", paint: { "fill-color": "#e7e4dc" } },
+    { id: "landcover", type: "fill", source: "base", "source-layer": "landcover", paint: { "fill-color": "#dfe7cf", "fill-opacity": 0.6 } },
+    { id: "landuse", type: "fill", source: "base", "source-layer": "landuse", paint: { "fill-color": "#e9e4d8", "fill-opacity": 0.5 } },
+    { id: "water", type: "fill", source: "base", "source-layer": "water", paint: { "fill-color": "#a3c9ef" } },
+    { id: "roads", type: "line", source: "base", "source-layer": "roads",
+      paint: { "line-color": "#ffffff", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.5, 16, 4] } },
+    { id: "roads-case", type: "line", source: "base", "source-layer": "roads",
+      paint: { "line-color": "#cfcabf", "line-gap-width": ["interpolate", ["linear"], ["zoom"], 11, 0.5, 16, 4], "line-width": 1 } },
+    { id: "buildings", type: "fill", source: "base", "source-layer": "buildings",
+      paint: { "fill-color": "#d6cdc0", "fill-opacity": 0.9 } }
+  ]
+};
+
+const map = new maplibregl.Map({
+  container: "map", style, center: C, zoom: 14.2, pitch: 55, bearing: 20, maxPitch: 85
+});
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
+map.on("error", (e) => fail("map.error", e && e.error));
+
+// 3) 점군 바이너리 로드 + deck.gl 오버레이
+async function loadCloud() {
+ try {
+  const meta = await (await fetch("./jeonju_pts_meta.json")).json();
+  const pos = new Float32Array(await (await fetch("./jeonju_pos.f32")).arrayBuffer());
+  const col = new Uint8Array(await (await fetch("./jeonju_col.u8")).arrayBuffer());
+  const n = meta.count;
+
+  function makeLayer(size, visible) {
+    return new deck.PointCloudLayer({
+      id: "jeonju-lidar", visible,
+      data: { length: n, attributes: { getPosition: { value: pos, size: 3 }, getColor: { value: col, size: 3 } } },
+      coordinateSystem: deck.COORDINATE_SYSTEM.METER_OFFSETS,
+      coordinateOrigin: [meta.origin[0], meta.origin[1], 0],
+      sizeUnits: "pixels", pointSize: size, material: false, opacity: 1,
+      parameters: { depthTest: true }
+    });
+  }
+  // 비인터리브 + 2배 슈퍼샘플 → 점이 또렷(안티에일리어싱)
+  const overlay = new deck.MapboxOverlay({ interleaved: false, useDevicePixels: 2, layers: [makeLayer(1.5, true)] });
+  map.addControl(overlay);
+
+  hud.innerHTML = `전주 항공 LiDAR (AI Hub 474) × OSM 베이스맵(PMTiles)<br>${n.toLocaleString()} pts · 실좌표(EPSG:5186→WGS84) 정합`;
+  let size = 1.5, vis = true;
+  const upd = () => overlay.setProps({ layers: [makeLayer(size, vis)] });
+  document.getElementById("sz").oninput = (e) => { size = +e.target.value; document.getElementById("szv").textContent = e.target.value; upd(); };
+  document.getElementById("vis").onchange = (e) => { vis = e.target.checked; upd(); };
+ } catch (e) { fail("loadCloud", e); }
+}
+map.on("load", loadCloud);
+</script>
+</body>
+</html>

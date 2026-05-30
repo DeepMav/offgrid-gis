@@ -1,0 +1,14 @@
+listen_addresses: '0.0.0.0:3001'
+cache_size_mb: 512
+pmtiles:
+  sources:
+    # 경로는 이 config 파일 기준 상대경로. korea.pmtiles는 별도 생성/배치 필요(README 참고)
+    korea: korea.pmtiles
+postgres:
+  # DATABASE_URL 환경변수로 주입 (예: export DATABASE_URL=postgresql://postgres:비밀번호@localhost:5432/gis)
+  connection_string: ${DATABASE_URL}
+  auto_publish:
+    tables:
+      from_schemas: [public]
+fonts: /usr/share/fonts/truetype/nanum
+sprites: sprite_svg

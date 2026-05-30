@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>전주 비교: 점군 vs 표면 메시</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: sans-serif; }
+  .split { display: flex; height: 100%; }
+  .pane { flex: 1; position: relative; border-right: 2px solid #333; }
+  .pane:last-child { border-right: 0; }
+  iframe { width: 100%; height: 100%; border: 0; display: block; }
+  .lbl { position: absolute; top: 8px; left: 8px; z-index: 2; color: #fff; font: bold 13px monospace;
+         background: rgba(0,0,0,.6); padding: 5px 9px; border-radius: 5px; pointer-events: none; }
+  .sub { font-weight: normal; color: #9cf; font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="split">
+  <div class="pane">
+    <div class="lbl">① 원본 LiDAR 점군<br><span class="sub">3.6M points · 점으로 보임</span></div>
+    <iframe src="./jeonju.html?ply=jeonju.ply"></iframe>
+  </div>
+  <div class="pane">
+    <div class="lbl">② 표면 메시 (A: Poisson)<br><span class="sub">1.2M faces · 솔리드 음영</span></div>
+    <iframe src="./jeonju_mesh.html?ply=jeonju_mesh.ply"></iframe>
+  </div>
+</div>
+</body>
+</html>

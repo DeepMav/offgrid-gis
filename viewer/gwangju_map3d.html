@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>광주 3D 건물 × 2D 맵서버 (MapLibre fill-extrusion)</title>
+<link href="./node_modules/maplibre-gl/dist/maplibre-gl.css" rel="stylesheet" />
+<style>
+  html, body, #map { margin: 0; height: 100%; width: 100%; }
+  #hud { position: fixed; top: 8px; left: 10px; z-index: 5; color: #036; font: 12px/1.5 monospace;
+         background: rgba(255,255,255,.88); padding: 6px 10px; border-radius: 6px; }
+</style>
+<script src="./node_modules/maplibre-gl/dist/maplibre-gl.js"></script>
+<script src="./node_modules/pmtiles/dist/pmtiles.js"></script>
+</head>
+<body>
+<div id="map"></div>
+<div id="hud">광주 3D 건물(LiDAR 높이) × OSM 베이스맵(우리 PMTiles)<br>로딩 중…</div>
+<script>
+const hud = document.getElementById("hud");
+window.addEventListener("error", (e) => hud.innerHTML = "❌ " + e.message);
+
+const protocol = new pmtiles.Protocol({ metadata: true });
+maplibregl.addProtocol("pmtiles", protocol.tile);
+const PM = "pmtiles://" + location.origin + "/gwangju_basemap.pmtiles";
+const C = [126.856405, 35.134698];
+
+const style = {
+  version: 8, sources: {
+    base: { type: "vector", url: PM, attribution: "© OpenStreetMap" },
+    bld3d: { type: "geojson", data: "./gwangju_buildings3d.geojson" }
+  },
+  light: { anchor: "viewport", color: "#fff", intensity: 0.5, position: [1.2, 90, 40] },
+  layers: [
+    { id: "bg", type: "background", paint: { "background-color": "#eceae3" } },
+    { id: "earth", type: "fill", source: "base", "source-layer": "earth", paint: { "fill-color": "#e4e1d8" } },
+    { id: "landuse", type: "fill", source: "base", "source-layer": "landuse", paint: { "fill-color": "#e7e2d4", "fill-opacity": 0.5 } },
+    { id: "water", type: "fill", source: "base", "source-layer": "water", paint: { "fill-color": "#a7cdf0" } },
+    { id: "roads", type: "line", source: "base", "source-layer": "roads",
+      paint: { "line-color": "#ffffff", "line-width": ["interpolate", ["linear"], ["zoom"], 12, 0.6, 17, 5] } },
+    { id: "bld-flat", type: "fill", source: "base", "source-layer": "buildings",
+      paint: { "fill-color": "#dad3c6", "fill-opacity": 0.5 } },
+    { id: "bld-3d", type: "fill-extrusion", source: "bld3d",
+      paint: {
+        "fill-extrusion-color": "#cdc6b8",
+        "fill-extrusion-height": ["get", "height"],
+        "fill-extrusion-base": 0,
+        "fill-extrusion-opacity": 0.95
+      } }
+  ]
+};
+
+const map = new maplibregl.Map({ container: "map", style, center: C, zoom: 13.6, pitch: 60, bearing: 12, maxPitch: 85 });
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
+map.on("error", (e) => { if (e && e.error) hud.innerHTML = "map.error: " + e.error.message; });
+map.on("load", () => {
+  hud.innerHTML = "광주 3D 건물(LiDAR 높이 2~53m, 광주 1738동) × OSM 베이스맵(우리 PMTiles)<br>우클릭드래그=기울이기/회전 · 실좌표 정합";
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>전주 텍스처 3D 도시 (LOD 건물 + 정사영상)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #aac4e0; }
+  #hud { position: fixed; top: 8px; left: 10px; color: #024; font: 12px/1.5 monospace;
+         background: rgba(255,255,255,.8); padding: 6px 10px; border-radius: 6px; z-index: 10; }
+  #ctl { position: fixed; bottom: 10px; left: 10px; color: #024; font: 12px monospace;
+         background: rgba(255,255,255,.85); padding: 6px 10px; border-radius: 6px; z-index: 10; }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "./node_modules/three/build/three.module.js",
+    "three/addons/": "./node_modules/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="hud">텍스처 도시 로딩 중…</div>
+<div id="ctl">
+  <label>건물 <select id="lod"><option value="jeonju_lod1_tex.glb">LOD1(전체739동)</option><option value="jeonju_lod2_tex.glb">LOD2(지붕13동)</option></select></label> ·
+  <label><input id="btex" type="checkbox"> 건물 텍스처</label> ·
+  <label><input id="grd" type="checkbox" checked> 정사영상 지면</label>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const hud = document.getElementById('hud');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio * 1.5, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xaac4e0);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.5, 100000);
+const controls = new OrbitControls(camera, renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xcfe2ff, 0x55503f, 1.3));
+const sun = new THREE.DirectionalLight(0xfff4e0, 2.0); sun.position.set(0.6, 1.5, 0.8); scene.add(sun);
+
+const world = new THREE.Group(); world.rotateX(-Math.PI / 2); scene.add(world);   // z-up→y-up
+
+// 정사영상 지면
+let ground = null;
+const meta = await (await fetch('jeonju_ortho_meta.json')).json();
+const [x0, x1, y0, y1] = meta.extent_centered;
+function addGround() {
+  const tex = new THREE.TextureLoader().load('jeonju_ortho.png');
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const geo = new THREE.PlaneGeometry(x1 - x0, y1 - y0);
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, roughness: 1 }));
+  m.position.set((x0 + x1) / 2, (y0 + y1) / 2, 0.0);   // tile XY 평면
+  ground = m; world.add(m);
+}
+addGround();
+
+let buildings = null;
+const solidMat = new THREE.MeshStandardMaterial({ color: 0xeae6de, roughness: 0.9, metalness: 0, side: THREE.DoubleSide, flatShading: true });
+function applyBuildingMat() {
+  if (!buildings) return;
+  const tex = document.getElementById('btex').checked;
+  buildings.traverse((c) => { if (c.isMesh) { c.material = tex ? c.userData.texMat : solidMat; } });
+}
+function loadGLB(url) {
+  if (buildings) { world.remove(buildings); buildings = null; }
+  new GLTFLoader().load(url, (g) => {
+    buildings = g.scene;
+    buildings.traverse((c) => { if (c.isMesh) { c.material.roughness = 0.95; c.material.metalness = 0; c.material.side = THREE.DoubleSide; c.userData.texMat = c.material; } });
+    world.add(buildings);
+    applyBuildingMat();
+    const box = new THREE.Box3().setFromObject(world);
+    const c = new THREE.Vector3(); box.getCenter(c);
+    const s = new THREE.Vector3(); box.getSize(s);
+    const d = Math.max(s.x, s.z);
+    controls.target.copy(c);
+    camera.position.set(c.x + d * 0.35, c.y + d * 0.45, c.z + d * 0.55);
+    camera.far = d * 20; camera.updateProjectionMatrix();
+    hud.textContent = `전주 텍스처 3D 도시 · ${url.includes('lod2') ? 'LOD2 지붕형상' : 'LOD1 전체'} + 항공 정사영상\n드래그=회전 휠=줌`;
+  }, undefined, (e) => hud.textContent = 'GLB 로드 실패: ' + e);
+}
+loadGLB('jeonju_lod1_tex.glb');
+
+document.getElementById('lod').onchange = (e) => loadGLB(e.target.value);
+document.getElementById('btex').onchange = applyBuildingMat;
+document.getElementById('grd').onchange = (e) => { if (ground) ground.visible = e.target.checked; };
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+(function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+</script>
+</body>
+</html>

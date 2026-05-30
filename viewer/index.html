@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>3DGS 파일럿 뷰어 — garden (우리 SfM)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #111; }
+  #hud { position: fixed; top: 8px; left: 10px; color: #9f9; font: 12px monospace;
+         background: rgba(0,0,0,.5); padding: 6px 10px; border-radius: 6px; z-index: 10; }
+  #err { position: fixed; top: 40%; width: 100%; text-align: center; color: #f88;
+         font: 14px monospace; white-space: pre-wrap; }
+</style>
+<!-- three(core)만 외부 의존. GaussianSplats3D(MIT)는 로컬 self-host -->
+<script type="importmap">
+{ "imports": { "three": "./node_modules/three/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="hud">로딩 중…</div>
+<div id="err"></div>
+<script type="module">
+import * as GaussianSplats3D from './node_modules/@mkkellogg/gaussian-splats-3d/build/gaussian-splats-3d.module.js';
+
+const params = new URLSearchParams(location.search);
+const scene = params.get('ply') || 'scene.ply';
+const sh = parseInt(params.get('sh') ?? '0', 10);   // 0=DC만(경량), 2=풀퀄(view-dependent)
+const hud = document.getElementById('hud');
+
+const viewer = new GaussianSplats3D.Viewer({
+  cameraUp: [0, -1, 0],
+  initialCameraPosition: [-1, -0.2, -3.5],
+  initialCameraLookAt: [0, 0, 0],
+  sphericalHarmonicsDegree: sh,
+  sharedMemoryForWorkers: false,  // COOP/COEP 없는 정적 서버에서도 동작 (SharedArrayBuffer 미사용)
+});
+
+viewer.addSplatScene(scene, { showLoadingUI: true })
+  .then(() => { viewer.start(); hud.textContent = '드래그=회전 · 휠=줌 · 우클릭드래그=이동  |  ' + scene + ' (SH ' + sh + ')'; })
+  .catch((e) => {
+    hud.style.display = 'none';
+    document.getElementById('err').textContent = 'splat 로드 실패:\n' + e + '\n\n.ply 경로(?ply=)를 확인하세요.';
+  });
+</script>
+</body>
+</html>

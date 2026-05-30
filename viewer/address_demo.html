@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>전국 지도 — 주소/POI/3D건물 (PostGIS × martin)</title>
+<link href="./node_modules/maplibre-gl/dist/maplibre-gl.css" rel="stylesheet" />
+<style>
+  html, body, #map { margin: 0; height: 100%; width: 100%; }
+  #search { position: fixed; top: 10px; left: 10px; z-index: 6; width: 330px; font: 14px sans-serif; }
+  #qbox { position: relative; }
+  #q { width: 100%; padding: 10px 30px 10px 12px; border: 1px solid #bbb; border-radius: 8px; box-sizing: border-box; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+  #clr { position: absolute; right: 8px; top: 8px; cursor: pointer; color: #999; display: none; }
+  #res { background: #fff; border: 1px solid #ddd; border-top: 0; border-radius: 0 0 8px 8px; max-height: 340px; overflow: auto; box-shadow: 0 4px 8px rgba(0,0,0,.12); }
+  #res div { padding: 8px 11px; cursor: pointer; border-bottom: 1px solid #f1f1f1; }
+  #res div.sel, #res div:hover { background: #eef4ff; }
+  #hud { position: fixed; bottom: 6px; left: 10px; z-index: 5; color: #036; font: 11px monospace; background: rgba(255,255,255,.85); padding: 4px 8px; border-radius: 5px; }
+  .maplibregl-popup-content { font: 13px sans-serif; }
+</style>
+<script src="./node_modules/maplibre-gl/dist/maplibre-gl.js"></script>
+</head>
+<body>
+<div id="map"></div>
+<div id="search"><div id="qbox"><input id="q" placeholder="전국 장소·주소 검색 (예: 강남역, 부산 해운대, 컨벤션)" autocomplete="off"><span id="clr">✕</span></div><div id="res"></div></div>
+<div id="hud">전국 PostGIS 지도 · martin · OSM(ODbL)</div>
+<script>
+const M = "http://localhost:3001";
+const FONT = ["NanumGothic Regular"];
+const poiIcon = ["match", ["get","cat"],
+  "restaurant","restaurant","cafe","cafe","fast_food","fast-food","bar","bar","pub","bar",
+  "hospital","hospital","clinic","hospital","doctors","doctor","dentist","doctor","pharmacy","pharmacy",
+  "bank","bank","hotel","lodging","motel","lodging","guest_house","lodging",
+  "school","school","university","school","college","school","kindergarten","school",
+  "place_of_worship","place-of-worship","supermarket","grocery","convenience","convenience",
+  "hairdresser","hairdresser","fuel","fuel","parking","parking","police","police","townhall","town-hall",
+  "marker"];
+const catColor = ["match", ["get","cat"],
+  "restaurant","#f97316","cafe","#f59e0b","fast_food","#fb923c","bar","#ef8a3c","pub","#ef8a3c",
+  "hospital","#ef4444","clinic","#ef4444","doctors","#f43f6f","dentist","#f43f6f","pharmacy","#e11d48",
+  "bank","#3b82f6",
+  "school","#8b5cf6","university","#7c3aed","college","#7c3aed","kindergarten","#a78bfa",
+  "supermarket","#10b981","convenience","#14b8a6","shop","#0ea5a5","mall","#0d9488","department_store","#0d9488",
+  "hotel","#ec4899","motel","#ec4899","guest_house","#f472b6",
+  "place_of_worship","#a16207","fuel","#0891b2","parking","#0e7490","police","#1e40af","townhall","#475569",
+  "#9aa3af"];
+
+const style = {
+  version: 8,
+  glyphs: M + "/font/{fontstack}/{range}.pbf",
+  sprite: M + "/sprite/sprite_svg",
+  sources: {
+    km:  { type: "vector", url: M + "/korea" },
+    bld: { type: "vector", url: M + "/gwangju_buildings" },
+    poi: { type: "vector", url: M + "/poi" }
+  },
+  light: { anchor: "viewport", intensity: 0.4, position: [1.3, 90, 35] },
+  layers: [
+    { id: "bg", type: "background", paint: { "background-color": "#eaf0ea" } },
+    { id: "landcover-wood", type: "fill", source: "km", "source-layer": "landcover", filter: ["==",["get","class"],"wood"], paint: { "fill-color": "#a3d68a", "fill-opacity": 0.75 } },
+    { id: "landcover-grass", type: "fill", source: "km", "source-layer": "landcover", filter: ["in",["get","class"],["literal",["grass","wetland"]]], paint: { "fill-color": "#c2e3a0", "fill-opacity": 0.7 } },
+    { id: "landuse-resid", type: "fill", source: "km", "source-layer": "landuse", filter: ["in",["get","class"],["literal",["residential","suburb","neighbourhood"]]], paint: { "fill-color": "#efe9df" } },
+    { id: "landuse-other", type: "fill", source: "km", "source-layer": "landuse", filter: ["in",["get","class"],["literal",["industrial","commercial","retail"]]], paint: { "fill-color": "#ece4e0", "fill-opacity": 0.6 } },
+    { id: "park", type: "fill", source: "km", "source-layer": "park", paint: { "fill-color": "#9fd886", "fill-opacity": 0.7 } },
+    { id: "water", type: "fill", source: "km", "source-layer": "water", paint: { "fill-color": "#5aa9e6" } },
+    { id: "waterway", type: "line", source: "km", "source-layer": "waterway", paint: { "line-color": "#5aa9e6", "line-width": ["interpolate",["linear"],["zoom"],8,0.6,14,3] } },
+    // 도로 — 케이싱(테두리) + 본선
+    { id: "road-case", type: "line", source: "km", "source-layer": "transportation", filter: ["in",["get","class"],["literal",["motorway","trunk","primary","secondary","tertiary","minor"]]], minzoom: 11,
+      layout: { "line-cap":"round","line-join":"round" }, paint: { "line-color": "#d9d2c4", "line-gap-width": ["interpolate",["linear"],["zoom"],11,0.5,16,6], "line-width": 1.4 } },
+    { id: "road-minor", type: "line", source: "km", "source-layer": "transportation", filter: ["in",["get","class"],["literal",["minor","service","track"]]], paint: { "line-color": "#ffffff", "line-width": ["interpolate",["linear"],["zoom"],13,0.6,16,3.5] } },
+    { id: "road-main", type: "line", source: "km", "source-layer": "transportation", filter: ["in",["get","class"],["literal",["secondary","tertiary","primary","trunk","motorway"]]],
+      layout: { "line-cap":"round","line-join":"round" }, paint: { "line-color": ["match",["get","class"],"motorway","#f6a866","trunk","#f8c08a","primary","#fdd9a0","#ffffff"], "line-width": ["interpolate",["linear"],["zoom"],6,0.6,12,2.5,16,7] } },
+    { id: "rail", type: "line", source: "km", "source-layer": "transportation", filter: ["==",["get","class"],"rail"], minzoom: 11, paint: { "line-color": "#b6b0a6", "line-width": 1 } },
+    // 건물: 전국(PMTiles) + 광주 LiDAR 강조
+    { id: "korea-3d", type: "fill-extrusion", source: "km", "source-layer": "building", minzoom: 14, paint: { "fill-extrusion-color": ["interpolate",["linear"],["coalesce",["get","render_height"],6],3,"#e6dcc8",25,"#d4b89a",70,"#bd9678"], "fill-extrusion-height": ["coalesce",["get","render_height"],6], "fill-extrusion-base": ["coalesce",["get","render_min_height"],0], "fill-extrusion-opacity": 0.85 } },
+    { id: "bld-3d", type: "fill-extrusion", source: "bld", "source-layer": "gwangju_buildings", minzoom: 13, paint: { "fill-extrusion-color": ["interpolate",["linear"],["get","height"],3,"#cdd6cf",20,"#c4b8a6",45,"#b09a82"], "fill-extrusion-height": ["get","height"], "fill-extrusion-opacity": 0.92 } },
+    { id: "bld-label", type: "symbol", source: "bld", "source-layer": "gwangju_buildings", minzoom: 16.5, layout: { "text-field": ["coalesce",["get","addr"],""], "text-font": FONT, "text-size": 10.5, "text-max-width": 7 }, paint: { "text-color": "#333", "text-halo-color": "#fff", "text-halo-width": 1.3 } },
+    // POI 카테고리 색상 원 (식당🟠 병원🔴 은행🔵 학교🟣 상점🟢 ...)
+    { id: "poi-bg", type: "circle", source: "poi", "source-layer": "poi", minzoom: 13,
+      paint: { "circle-radius": ["interpolate",["linear"],["zoom"],13,3.5,17,7], "circle-color": catColor, "circle-stroke-color": "#fff", "circle-stroke-width": 1.3, "circle-opacity": 0.95 } },
+    // POI 아이콘 + 이름 (충돌 디클러터)
+    { id: "poi-symbol", type: "symbol", source: "poi", "source-layer": "poi", minzoom: 14,
+      layout: { "icon-image": poiIcon, "icon-size": ["interpolate",["linear"],["zoom"],13,0.8,17,1.2], "icon-allow-overlap": false,
+                "text-field": ["get","name"], "text-font": FONT, "text-size": 11, "text-anchor": "top", "text-offset": [0,1.0], "text-optional": true, "text-max-width": 8 },
+      paint: { "text-color": "#3a2a18", "text-halo-color": "#fff", "text-halo-width": 1.5, "icon-halo-color":"#fff","icon-halo-width":1 } },
+    // 지명 라벨 (시/구/동)
+    { id: "place-city", type: "symbol", source: "km", "source-layer": "place", filter: ["in",["get","class"],["literal",["city","province"]]], minzoom: 5, maxzoom: 13,
+      layout: { "text-field": ["get","name"], "text-font": FONT, "text-size": ["interpolate",["linear"],["zoom"],5,12,10,20], "text-max-width": 8 }, paint: { "text-color": "#222", "text-halo-color": "#fff", "text-halo-width": 1.8 } },
+    { id: "place-town", type: "symbol", source: "km", "source-layer": "place", filter: ["in",["get","class"],["literal",["town","suburb"]]], minzoom: 10, maxzoom: 16,
+      layout: { "text-field": ["get","name"], "text-font": FONT, "text-size": ["interpolate",["linear"],["zoom"],10,11,14,15] }, paint: { "text-color": "#444", "text-halo-color": "#fff", "text-halo-width": 1.5 } },
+    { id: "place-village", type: "symbol", source: "km", "source-layer": "place", filter: ["in",["get","class"],["literal",["village","neighbourhood","hamlet"]]], minzoom: 12,
+      layout: { "text-field": ["get","name"], "text-font": FONT, "text-size": 11 }, paint: { "text-color": "#666", "text-halo-color": "#fff", "text-halo-width": 1.4 } }
+  ]
+};
+const map = new maplibregl.Map({ container: "map", style, center: [126.8564, 35.1345], zoom: 13.5, pitch: 50, maxPitch: 85, maxZoom: 19 });
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
+map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
+map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), "bottom-right");
+
+function popup(lngLat, html) { new maplibregl.Popup().setLngLat(lngLat).setHTML(html).addTo(map); }
+map.on("click", "poi-bg", (e) => { const p = e.features[0].properties; popup(e.lngLat, `<b>${p.name||"(이름없음)"}</b><br><span style="color:#888">${p.cat||""}</span>`); });
+// 건물 클릭 → 주소 + 높이 (단일 팝업). 광주(bld-3d) 우선, 없으면 전국(korea-3d).
+map.on("click", (e) => {
+  const f = map.queryRenderedFeatures(e.point, { layers: ["poi-bg","bld-3d","korea-3d"] });
+  if (!f.length) return;
+  if (f.some(x => x.layer.id === "poi-bg")) return;   // POI 클릭은 POI 핸들러가 처리(중복 방지)
+  const b = f.find(x => x.layer.id === "bld-3d") || f[0];
+  const html = (b.layer.id === "bld-3d")
+    ? `<b>${b.properties.addr || "(주소 미상)"}</b><br>높이 ${(+b.properties.height).toFixed(1)}m`
+    : `<b>건물</b><br>높이 ${(+b.properties.render_height || 0).toFixed(0)}m`;
+  popup(e.lngLat, html);
+});
+["poi-bg","bld-3d","korea-3d"].forEach(l => { map.on("mouseenter", l, () => map.getCanvas().style.cursor="pointer"); map.on("mouseleave", l, () => map.getCanvas().style.cursor=""); });
+
+// 검색 (키보드 ↑↓ Enter, 지우기)
+let marker = null, timer = null, sel = -1, items = [];
+const q = document.getElementById("q"), res = document.getElementById("res"), clr = document.getElementById("clr");
+function render() { res.innerHTML = items.map((r,i)=>`<div class="${i===sel?'sel':''}"><span style="font-size:10px;color:#fff;background:${r.kind==='도로명주소'?'#2a78b0':'#e07b39'};padding:1px 5px;border-radius:3px">${r.kind}</span> ${r.name}</div>`).join(""); [...res.children].forEach((el,i)=>el.onclick=()=>go(i)); }
+function go(i) { const r = items[i]; map.flyTo({center:[r.lon,r.lat],zoom:17,pitch:55}); if(marker)marker.remove(); marker=new maplibregl.Marker({color:"#1a73e8"}).setLngLat([r.lon,r.lat]).setPopup(new maplibregl.Popup().setHTML("<b>"+r.name+"</b>")).addTo(map).togglePopup(); res.innerHTML=""; items=[]; }
+q.addEventListener("input", () => { clr.style.display = q.value?"block":"none"; clearTimeout(timer); timer=setTimeout(async()=>{ const v=q.value.trim(); if(!v){items=[];res.innerHTML="";return;} items=await (await fetch("/search?q="+encodeURIComponent(v))).json(); sel=-1; render(); },200); });
+q.addEventListener("keydown",(e)=>{ if(!items.length)return; if(e.key==="ArrowDown"){sel=(sel+1)%items.length;render();e.preventDefault();} else if(e.key==="ArrowUp"){sel=(sel-1+items.length)%items.length;render();e.preventDefault();} else if(e.key==="Enter"){go(sel<0?0:sel);} });
+clr.onclick=()=>{ q.value="";items=[];res.innerHTML="";clr.style.display="none";q.focus(); };
+</script>
+</body>
+</html>

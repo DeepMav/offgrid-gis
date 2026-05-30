@@ -1,0 +1,19 @@
+{
+  "name": "viewer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@mkkellogg/gaussian-splats-3d": "^0.4.7",
+    "deck.gl": "^9.3.2",
+    "maplibre-gl": "^5.24.0",
+    "pmtiles": "^4.4.1",
+    "three": "^0.184.0"
+  }
+}

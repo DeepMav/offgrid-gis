@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>.ply → .ksplat 변환기</title>
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px;
+         background: #1a1a1a; color: #ddd; }
+  h1 { font-size: 18px; color: #9f9; }
+  label { display: block; margin: 14px 0 4px; color: #aaa; }
+  select, input { width: 100%; padding: 8px; background: #222; color: #eee; border: 1px solid #444; border-radius: 6px; }
+  button { margin-top: 20px; padding: 12px 20px; font-size: 15px; background: #2a7; color: #000;
+           border: 0; border-radius: 8px; cursor: pointer; font-weight: bold; }
+  button:disabled { background: #555; color: #999; cursor: wait; }
+  #log { margin-top: 20px; padding: 12px; background: #111; border-radius: 6px; white-space: pre-wrap;
+         font-family: monospace; font-size: 12px; min-height: 60px; }
+  .hint { color: #888; font-size: 12px; }
+  a { color: #6cf; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./node_modules/three/build/three.module.js" } }
+</script>
+</head>
+<body>
+<h1>3DGS .ply → .ksplat 변환기</h1>
+<p class="hint">비압축 .ply를 GaussianSplats3D 네이티브 압축 포맷(.ksplat)으로 변환합니다. 크기↓·로딩↓·렌더↑. 변환 결과는 <b>viewer 폴더에 자동 저장</b>됩니다.</p>
+
+<label>원본 .ply</label>
+<select id="src">
+  <option value="scene_full_sh3.ply">scene_full_sh3.ply (1M splats, SH3, 237MB)</option>
+  <option value="scene.ply">scene.ply (1M splats, SH0, 65MB)</option>
+  <option value="scene_fast.ply">scene_fast.ply (400k splats, SH1, 40MB)</option>
+</select>
+
+<label>압축 레벨</label>
+<select id="comp">
+  <option value="1" selected>1 — 16-bit (절반 크기, 권장)</option>
+  <option value="2">2 — 더 공격적 압축 (가장 작음/빠름, 화질 약간↓)</option>
+  <option value="0">0 — 무압축 (테스트용)</option>
+</select>
+
+<label>SH degree (view-dependent 색 표현)</label>
+<select id="sh">
+  <option value="2" selected>2 — 최고화질</option>
+  <option value="1">1 — 중간</option>
+  <option value="0">0 — DC만 (가장 가벼움)</option>
+</select>
+
+<label>저장 파일명</label>
+<input id="out" value="scene.ksplat" />
+
+<button id="go">변환 & viewer에 저장</button>
+<div id="log">대기 중…</div>
+
+<script type="module">
+import * as GaussianSplats3D from './node_modules/@mkkellogg/gaussian-splats-3d/build/gaussian-splats-3d.module.js';
+
+const log = (m) => { document.getElementById('log').textContent += '\n' + m; };
+const setlog = (m) => { document.getElementById('log').textContent = m; };
+
+document.getElementById('go').addEventListener('click', async () => {
+  const btn = document.getElementById('go');
+  const src = document.getElementById('src').value;
+  const compressionLevel = parseInt(document.getElementById('comp').value, 10);
+  const shDegree = parseInt(document.getElementById('sh').value, 10);
+  const outName = document.getElementById('out').value.trim() || 'scene.ksplat';
+  btn.disabled = true;
+  try {
+    setlog(`[1/4] ${src} 다운로드 중…`);
+    const t0 = performance.now();
+    const buf = await (await fetch(src)).arrayBuffer();
+    log(`     ${(buf.byteLength/1e6).toFixed(1)}MB 로드`);
+
+    log(`[2/4] .ply 파싱 + 압축(level ${compressionLevel}, SH ${shDegree})… (수십 초 소요 가능)`);
+    const minimumAlpha = 1;
+    const optimizeSplatData = true;
+    const splatBuffer = await new GaussianSplats3D.PlyLoader().loadFromFileData(
+      buf, minimumAlpha, compressionLevel, optimizeSplatData, shDegree
+    );
+    const outBytes = splatBuffer.bufferData;
+    log(`     변환 완료: ${(outBytes.byteLength/1e6).toFixed(1)}MB`);
+
+    log(`[3/4] viewer 폴더에 업로드(${outName})…`);
+    const res = await fetch('/upload?name=' + encodeURIComponent(outName), {
+      method: 'POST', body: outBytes, headers: { 'Content-Type': 'application/octet-stream' }
+    });
+    log('     ' + (await res.text()));
+
+    // 브라우저 다운로드도 함께 (백업)
+    GaussianSplats3D.KSplatLoader.downloadFile(splatBuffer, outName);
+
+    const dt = ((performance.now() - t0) / 1000).toFixed(1);
+    log(`[4/4] 완료 (${dt}s).  보기 →  /?ply=${encodeURIComponent(outName)}&sh=${shDegree}`);
+    log('     (viewer 폴더 저장됨 + 다운로드 폴더에도 백업 저장)');
+  } catch (e) {
+    log('❌ 오류: ' + (e && e.message ? e.message : e));
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
