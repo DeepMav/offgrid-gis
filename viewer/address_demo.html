@@ -16,12 +16,35 @@
   #res div.sel, #res div:hover { background: #eef4ff; }
   #hud { position: fixed; bottom: 6px; left: 10px; z-index: 5; color: #036; font: 11px monospace; background: rgba(255,255,255,.85); padding: 4px 8px; border-radius: 5px; }
   .maplibregl-popup-content { font: 13px sans-serif; }
+  #panel { position: fixed; top: 10px; right: 10px; z-index: 6; width: 196px; font: 12px sans-serif;
+           background: rgba(255,255,255,.95); border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,.22); padding: 8px 11px 11px; }
+  #panel h4 { margin: 9px 0 4px; font-size: 11px; color: #667; letter-spacing: .3px; }
+  #panel h4:first-child { margin-top: 2px; }
+  #panel label { display: block; margin: 3px 0; cursor: pointer; }
+  #cats { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip { padding: 3px 8px; border-radius: 12px; border: 1px solid #ccc; background: #fff; cursor: pointer; user-select: none; }
+  .chip.on { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+  .seg { display: flex; }
+  .seg button { flex: 1; padding: 5px; border: 1px solid #ccc; background: #fff; cursor: pointer; font: 11px sans-serif; }
+  .seg button.on { background: #333; color: #fff; border-color: #333; }
+  .seg button:first-child { border-radius: 6px 0 0 6px; } .seg button:last-child { border-radius: 0 6px 6px 0; border-left: 0; }
 </style>
 <script src="./node_modules/maplibre-gl/dist/maplibre-gl.js"></script>
 </head>
 <body>
 <div id="map"></div>
 <div id="search"><div id="qbox"><input id="q" placeholder="전국 장소·주소 검색 (예: 강남역, 부산 해운대, 컨벤션)" autocomplete="off"><span id="clr">✕</span></div><div id="res"></div></div>
+<div id="panel">
+  <h4>베이스맵</h4>
+  <div class="seg" id="theme"><button data-t="day" class="on">주간</button><button data-t="night">야간</button></div>
+  <h4>레이어</h4>
+  <label><input type="checkbox" id="t-bld" checked> 3D 건물</label>
+  <label><input type="checkbox" id="t-poi" checked> POI</label>
+  <label><input type="checkbox" id="t-label" checked> 지명 라벨</label>
+  <label><input type="checkbox" id="t-cluster"> POI 군집(클러스터)</label>
+  <h4>POI 카테고리</h4>
+  <div id="cats"></div>
+</div>
 <div id="hud">전국 PostGIS 지도 · martin · OSM(ODbL)</div>
 <script>
 const M = "http://localhost:3001";
@@ -111,6 +134,87 @@ map.on("click", (e) => {
   popup(e.lngLat, html);
 });
 ["poi-bg","bld-3d","korea-3d"].forEach(l => { map.on("mouseenter", l, () => map.getCanvas().style.cursor="pointer"); map.on("mouseleave", l, () => map.getCanvas().style.cursor=""); });
+
+// ── 컨트롤 패널: 베이스맵 테마 / 레이어 토글 / POI 카테고리 / 클러스터 ──
+let clusterOn = false;
+const K3D = ["interpolate",["linear"],["coalesce",["get","render_height"],6],3,"#e6dcc8",25,"#d4b89a",70,"#bd9678"];
+const B3D = ["interpolate",["linear"],["get","height"],3,"#cdd6cf",20,"#c4b8a6",45,"#b09a82"];
+const THEME = {
+  day: { bg:{"background-color":"#eaf0ea"}, water:{"fill-color":"#5aa9e6"}, waterway:{"line-color":"#5aa9e6"},
+    "landcover-wood":{"fill-color":"#a3d68a"}, "landcover-grass":{"fill-color":"#c2e3a0"},
+    "landuse-resid":{"fill-color":"#efe9df"}, "landuse-other":{"fill-color":"#ece4e0"}, park:{"fill-color":"#9fd886"},
+    "road-minor":{"line-color":"#ffffff"}, "road-case":{"line-color":"#d9d2c4"},
+    "korea-3d":{"fill-extrusion-color":K3D}, "bld-3d":{"fill-extrusion-color":B3D},
+    "place-city":{"text-color":"#222","text-halo-color":"#fff"}, "place-town":{"text-color":"#444","text-halo-color":"#fff"},
+    "place-village":{"text-color":"#666","text-halo-color":"#fff"}, "poi-symbol":{"text-color":"#3a2a18","text-halo-color":"#fff"} },
+  night: { bg:{"background-color":"#0e1116"}, water:{"fill-color":"#16324c"}, waterway:{"line-color":"#16324c"},
+    "landcover-wood":{"fill-color":"#15281a"}, "landcover-grass":{"fill-color":"#1b3320"},
+    "landuse-resid":{"fill-color":"#171a20"}, "landuse-other":{"fill-color":"#1c1f26"}, park:{"fill-color":"#173120"},
+    "road-minor":{"line-color":"#2b313c"}, "road-case":{"line-color":"#222833"},
+    "korea-3d":{"fill-extrusion-color":"#2a3040"}, "bld-3d":{"fill-extrusion-color":"#39414f"},
+    "place-city":{"text-color":"#dbe2ee","text-halo-color":"#0e1116"}, "place-town":{"text-color":"#aab4c4","text-halo-color":"#0e1116"},
+    "place-village":{"text-color":"#8b94a3","text-halo-color":"#0e1116"}, "poi-symbol":{"text-color":"#e7dcc8","text-halo-color":"#11151c"} }
+};
+const CATS = [["음식",["restaurant","cafe","fast_food","bar","pub"]],["의료",["hospital","clinic","doctors","dentist","pharmacy"]],
+  ["교육",["school","university","college","kindergarten"]],["금융",["bank"]],
+  ["쇼핑",["supermarket","convenience","shop","mall","department_store"]],["숙박",["hotel","motel","guest_house"]],
+  ["공공",["place_of_worship","fuel","parking","police","townhall"]]];
+
+map.on("load", () => {
+  const $ = (id) => document.getElementById(id);
+  const setVis = (ids, on) => ids.forEach(l => map.getLayer(l) && map.setLayoutProperty(l, "visibility", on ? "visible" : "none"));
+  const applyTheme = (t) => { const d = THEME[t]; for (const id in d) for (const p in d[id]) if (map.getLayer(id)) map.setPaintProperty(id, p, d[id][p]); };
+
+  // 테마
+  $("theme").querySelectorAll("button").forEach(b => b.onclick = () => {
+    $("theme").querySelectorAll("button").forEach(x => x.classList.remove("on")); b.classList.add("on"); applyTheme(b.dataset.t);
+  });
+  // 레이어 토글
+  $("t-bld").onchange = e => setVis(["korea-3d","bld-3d","bld-label"], e.target.checked);
+  $("t-label").onchange = e => setVis(["place-city","place-town","place-village"], e.target.checked);
+  $("t-poi").onchange = e => { if (!clusterOn) setVis(["poi-bg","poi-symbol"], e.target.checked); };
+
+  // POI 카테고리 필터
+  const sel = new Set();
+  const applyCats = () => {
+    let filt = null;
+    if (sel.size) { const list = []; sel.forEach(i => list.push(...CATS[i][1])); filt = ["in", ["get","cat"], ["literal", list]]; }
+    ["poi-bg","poi-symbol"].forEach(l => map.getLayer(l) && map.setFilter(l, filt));
+  };
+  CATS.forEach((c, i) => { const el = document.createElement("span"); el.className = "chip"; el.textContent = c[0];
+    el.onclick = () => { el.classList.toggle("on"); el.classList.contains("on") ? sel.add(i) : sel.delete(i); applyCats(); };
+    $("cats").appendChild(el); });
+
+  // 클러스터 (뷰포트 POI를 GeoJSON으로 받아 군집)
+  const ensureCluster = () => {
+    if (map.getSource("poic")) return;
+    map.addSource("poic", { type:"geojson", data:{type:"FeatureCollection",features:[]}, cluster:true, clusterMaxZoom:15, clusterRadius:50 });
+    map.addLayer({ id:"poic-cl", type:"circle", source:"poic", filter:["has","point_count"],
+      paint:{ "circle-color":["step",["get","point_count"],"#51bbd6",50,"#f1a340",200,"#e34a33"],
+              "circle-radius":["step",["get","point_count"],15,50,21,200,28], "circle-opacity":0.85, "circle-stroke-color":"#fff","circle-stroke-width":1.5 } });
+    map.addLayer({ id:"poic-ct", type:"symbol", source:"poic", filter:["has","point_count"],
+      layout:{ "text-field":["get","point_count_abbreviated"], "text-font":FONT, "text-size":12 }, paint:{ "text-color":"#fff" } });
+    map.addLayer({ id:"poic-pt", type:"circle", source:"poic", filter:["!",["has","point_count"]],
+      paint:{ "circle-color":catColor, "circle-radius":5, "circle-stroke-color":"#fff","circle-stroke-width":1.2 } });
+    map.on("click","poic-cl", (e) => { const f = map.queryRenderedFeatures(e.point,{layers:["poic-cl"]})[0];
+      map.getSource("poic").getClusterExpansionZoom(f.properties.cluster_id).then(z => map.easeTo({center:f.geometry.coordinates, zoom:z})); });
+    map.on("click","poic-pt", (e) => { const p = e.features[0].properties; popup(e.lngLat, `<b>${p.name||""}</b><br><span style="color:#888">${p.cat||""}</span>`); });
+    ["poic-cl","poic-pt"].forEach(l => { map.on("mouseenter",l,()=>map.getCanvas().style.cursor="pointer"); map.on("mouseleave",l,()=>map.getCanvas().style.cursor=""); });
+  };
+  const refreshClusters = async () => {
+    if (!clusterOn || !map.getSource("poic")) return;
+    if (map.getZoom() < 9) { map.getSource("poic").setData({type:"FeatureCollection",features:[]}); return; }
+    const b = map.getBounds();
+    try { const gj = await (await fetch(`/poi_bbox?w=${b.getWest()}&s=${b.getSouth()}&e=${b.getEast()}&n=${b.getNorth()}&limit=8000`)).json(); map.getSource("poic").setData(gj); } catch(_){}
+  };
+  map.on("moveend", refreshClusters);
+  $("t-cluster").onchange = (e) => {
+    clusterOn = e.target.checked; ensureCluster();
+    setVis(["poic-cl","poic-ct","poic-pt"], clusterOn);
+    setVis(["poi-bg","poi-symbol"], !clusterOn && $("t-poi").checked);   // 중복 방지
+    if (clusterOn) refreshClusters();
+  };
+});
 
 // 검색 (키보드 ↑↓ Enter, 지우기)
 let marker = null, timer = null, sel = -1, items = [];

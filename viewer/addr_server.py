@@ -50,6 +50,33 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(rows, ensure_ascii=False).encode("utf-8"))
             return
+        if u.path == "/poi_bbox":
+            # 뷰포트(bbox) 내 POI를 GeoJSON으로 반환 → 클라이언트 클러스터링용
+            qs = parse_qs(u.query)
+            try:
+                w = float(qs["w"][0]); s = float(qs["s"][0]); e = float(qs["e"][0]); n = float(qs["n"][0])
+            except Exception:
+                self.send_response(400); self.end_headers(); self.wfile.write(b'{"error":"bbox required"}'); return
+            lim = min(int(qs.get("limit", ["8000"])[0]), 12000)
+            feats = []
+            try:
+                con = psycopg2.connect(DSN); cur = con.cursor()
+                cur.execute(
+                    """SELECT name, cat, ST_X(geom), ST_Y(geom) FROM poi
+                       WHERE geom && ST_MakeEnvelope(%s,%s,%s,%s,4326) AND name IS NOT NULL
+                       LIMIT %s""", (w, s, e, n, lim))
+                for name, cat, lon, lat in cur.fetchall():
+                    feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                                  "properties": {"name": name, "cat": cat}})
+                cur.close(); con.close()
+            except Exception as ex:
+                self.send_response(500); self.end_headers()
+                self.wfile.write(json.dumps({"error": str(ex)}).encode()); return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"type": "FeatureCollection", "features": feats}, ensure_ascii=False).encode("utf-8"))
+            return
         if u.path == "/search":
             q = (parse_qs(u.query).get("q", [""])[0]).strip()
             rows = []
