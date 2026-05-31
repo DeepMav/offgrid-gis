@@ -29,7 +29,7 @@
 |---|---|
 | ![지형3D](docs/screenshots/feat_terrain.jpg) | ![가시권](docs/screenshots/feat_viewshed.jpg) |
 
-가시권 — LiDAR DSM 건물 차폐 (광주): 관측점에서 보이는 영역(빨강)이 도로를 따라 뻗고, 건물 뒤는 비가시
+가시권 — LiDAR 건물 차폐 (광주, 지면+건물 표면): 보이는 영역(빨강)이 도로·개활지를 따라 뻗고 건물에 가림 (나무·노이즈 제외)
 
 ![가시권DSM](docs/screenshots/feat_viewshed_dsm.jpg)
 
@@ -114,8 +114,9 @@ scripts/load_official_juso.sh shp <SHP경로> 5179
 cd viewer && gdal2tiles.py --xyz -z 11-14 -r near -w none terrain_rgb.tif terrain
 # 가시권은 addr_server의 /viewshed 가 terrain_dem.tif에 gdal_viewshed 를 실행
 
-# (선택) 건물 차폐 가시권용 고해상 DSM — 광주 LiDAR(LAS)에서 생성
-/usr/bin/python3 scripts/build_lidar_dsm.py   # → gwangju_dsm_3857.tif (1m, 건물·수목 포함)
+# (선택) 건물 차폐 가시권 표면 — 광주 LiDAR 지면(DTM) + 건물 footprint
+#   max-Z DSM은 나무·노이즈가 시선을 헛막음 → 매끈 지면 위에 건물만 세워 정확도↑
+/usr/bin/python3 scripts/build_viewshed_surface.py   # → gwangju_dsm_3857.tif (1m, 지면+건물)
 ```
 
 ### 3-2) (선택) 경로탐색용 도로망 적재 (pgRouting)
