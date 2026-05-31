@@ -18,6 +18,8 @@
 | ![3D 건물](docs/screenshots/closeup3d.jpg) | ![전국](docs/screenshots/nationwide.jpg) |
 | **POI 카테고리 아이콘** | **장소·주소 검색** |
 | ![POI](docs/screenshots/poi.jpg) | ![검색](docs/screenshots/search.jpg) |
+| **야간 테마 (3D)** | **POI 군집(클러스터링)** |
+| ![야간](docs/screenshots/feat_night.jpg) | ![클러스터](docs/screenshots/feat_cluster.jpg) |
 
 ## 주요 기능
 
