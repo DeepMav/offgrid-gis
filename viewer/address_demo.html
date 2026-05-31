@@ -16,7 +16,7 @@
   #res div.sel, #res div:hover { background: #eef4ff; }
   #hud { position: fixed; bottom: 6px; left: 10px; z-index: 5; color: #036; font: 11px monospace; background: rgba(255,255,255,.85); padding: 4px 8px; border-radius: 5px; }
   .maplibregl-popup-content { font: 13px sans-serif; }
-  #panel { position: fixed; top: 10px; right: 10px; z-index: 6; width: 196px; font: 12px sans-serif;
+  #panel { position: fixed; top: 10px; right: 10px; z-index: 6; width: 216px; font: 12px sans-serif;
            background: rgba(255,255,255,.95); border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,.22); padding: 8px 11px 11px; }
   #panel h4 { margin: 9px 0 4px; font-size: 11px; color: #667; letter-spacing: .3px; }
   #panel h4:first-child { margin-top: 2px; }
@@ -49,7 +49,7 @@
   <h4>POI 카테고리</h4>
   <div id="cats"></div>
   <h4>도구 (측정·그리기)</h4>
-  <div class="seg" id="tools"><button data-d="line">거리</button><button data-d="poly">면적</button><button data-d="point">주석</button><button data-d="viewshed">가시권</button></div>
+  <div class="seg" id="tools"><button data-d="line">거리</button><button data-d="poly">면적</button><button data-d="point">주석</button><button data-d="viewshed">가시권</button><button data-d="route">경로</button></div>
   <button id="draw-clear">지우기</button>
   <div id="measure"></div>
 </div>
@@ -267,6 +267,11 @@ map.on("load", () => {
   }
   map.on("click", (e) => {
     if (!drawMode) return;
+    if (drawMode==="route"){
+      if (!routeStart){ routeStart=[e.lngLat.lng,e.lngLat.lat]; if(routeSM)routeSM.remove(); routeSM=new maplibregl.Marker({color:"#2ecc71"}).setLngLat(routeStart).addTo(map); measureEl.style.display="block"; measureEl.textContent="도착지를 클릭하세요"; }
+      else { runRoute(routeStart, [e.lngLat.lng,e.lngLat.lat]); routeStart=null; }
+      return;
+    }
     if (drawMode==="viewshed"){ runViewshed(e.lngLat.lng, e.lngLat.lat); return; }
     if (drawMode==="point"){ const t=prompt("주석 텍스트:",""); if(t!==null){ drawFC.features.push({type:"Feature",geometry:{type:"Point",coordinates:[e.lngLat.lng,e.lngLat.lat]},properties:{kind:"anno",label:t||"📍"}}); map.getSource("draw").setData(drawFC); } return; }
     dpts.push([e.lngLat.lng,e.lngLat.lat]); refreshPreview();
@@ -275,13 +280,13 @@ map.on("load", () => {
   map.on("dblclick", () => { if (drawMode && drawMode!=="point") finishDraw(); });
   document.addEventListener("keydown", (e) => { if(!drawMode) return; if(e.key==="Enter") finishDraw(); else if(e.key==="Escape"){ dpts=[]; refreshPreview(); } });
   function setMode(m){
-    drawMode = (drawMode===m) ? null : m; dpts=[]; refreshPreview();
+    drawMode = (drawMode===m) ? null : m; dpts=[]; routeStart=null; refreshPreview();
     document.querySelectorAll("#tools button").forEach(b=>b.classList.toggle("on", b.dataset.d===drawMode));
     map.getCanvas().style.cursor = drawMode ? "crosshair" : "";
     drawMode ? map.doubleClickZoom.disable() : map.doubleClickZoom.enable();
   }
   document.querySelectorAll("#tools button").forEach(b=> b.onclick=()=>setMode(b.dataset.d));
-  $("draw-clear").onclick=()=>{ drawFC.features=[]; map.getSource("draw").setData(drawFC); dpts=[]; refreshPreview(); if(vsMarker){vsMarker.remove();vsMarker=null;} map.getSource("vs").setData({type:"FeatureCollection",features:[]}); };
+  $("draw-clear").onclick=()=>{ drawFC.features=[]; map.getSource("draw").setData(drawFC); dpts=[]; refreshPreview(); if(vsMarker){vsMarker.remove();vsMarker=null;} map.getSource("vs").setData({type:"FeatureCollection",features:[]}); clearRoute(); };
 
   // ── 지형 3D (로컬 terrain-RGB 타일, 서울 북부 시범영역) ──
   $("t-terrain").onchange = (e) => {
@@ -313,6 +318,25 @@ map.on("load", () => {
       measureEl.innerHTML = "가시권(초록) — <b>관측높이 10m · 반경 12km</b>";
     } catch(_) { measureEl.textContent = "가시권 요청 실패"; }
   }
+
+  // ── 경로탐색 (pgRouting, 서울권 도로망) ──
+  let routeStart=null, routeSM=null, routeEM=null;
+  map.addSource("route", { type:"geojson", data:{type:"FeatureCollection",features:[]} });
+  map.addLayer({ id:"route-case", type:"line", source:"route", layout:{"line-cap":"round","line-join":"round"}, paint:{ "line-color":"#ffffff", "line-width":7 } });
+  map.addLayer({ id:"route-line", type:"line", source:"route", layout:{"line-cap":"round","line-join":"round"}, paint:{ "line-color":"#1a73e8", "line-width":4.5 } });
+  async function runRoute(a, b) {
+    measureEl.style.display="block"; measureEl.textContent="경로 계산 중…";
+    try {
+      const gj = await (await fetch(`/route?from=${a[0]},${a[1]}&to=${b[0]},${b[1]}`)).json();
+      if (gj.error) { measureEl.textContent = gj.msg || ("오류: "+gj.error); return; }
+      map.getSource("route").setData(gj);
+      if (routeEM) routeEM.remove();
+      routeEM = new maplibregl.Marker({color:"#e74c3c"}).setLngLat(b).addTo(map);
+      const p = gj.features[0].properties;
+      measureEl.innerHTML = `경로 <b>${(p.dist_m/1000).toFixed(2)} km</b> · 약 <b>${Math.max(1,Math.round(p.time_s/60))}분</b>`;
+    } catch(_) { measureEl.textContent = "경로 요청 실패"; }
+  }
+  function clearRoute(){ routeStart=null; if(routeSM){routeSM.remove();routeSM=null;} if(routeEM){routeEM.remove();routeEM=null;} if(map.getSource("route")) map.getSource("route").setData({type:"FeatureCollection",features:[]}); }
 });
 
 // 검색 (키보드 ↑↓ Enter, 지우기)

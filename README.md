@@ -29,6 +29,10 @@
 |---|---|
 | ![지형3D](docs/screenshots/feat_terrain.jpg) | ![가시권](docs/screenshots/feat_viewshed.jpg) |
 
+경로탐색 (pgRouting 최단경로)
+
+![경로탐색](docs/screenshots/feat_route.jpg)
+
 ## 주요 기능
 
 - **오프라인 벡터 베이스맵** — OpenStreetMap → planetiler로 직접 빌드한 PMTiles, martin으로 서빙
@@ -39,6 +43,7 @@
 - **측정·그리기 도구** — 거리·면적 측정(지구 타원체 보정), 선/면 그리기, 마커 주석. 외부 라이브러리 없이 구현
 - **지형 3D** — 로컬 terrain-RGB 타일로 음영기복(hillshade) + 3D 지형(MapLibre terrain)
 - **가시권 분석(viewshed)** — 관측점에서 보이는 영역을 `gdal_viewshed`로 계산해 오버레이 (통신·감시·조망 분석)
+- **경로탐색(routing)** — pgRouting(`pgr_dijkstra`) 최단경로 + 거리·시간. 외부 라우팅 서버 없이 PostGIS 내에서 완결
 - **단일 타일서버(martin)** 로 PMTiles·PostGIS·글리프·스프라이트 통합 서빙
 
 ## 아키텍처
@@ -104,6 +109,15 @@ scripts/load_official_juso.sh shp <SHP경로> 5179
 # terrain-RGB → XYZ 타일(MapLibre raster-dem 용, 인코딩 보존 위해 near)
 cd viewer && gdal2tiles.py --xyz -z 11-14 -r near -w none terrain_rgb.tif terrain
 # 가시권은 addr_server의 /viewshed 가 terrain_dem.tif에 gdal_viewshed 를 실행
+```
+
+### 3-2) (선택) 경로탐색용 도로망 적재 (pgRouting)
+
+```bash
+# 의존: postgresql-16-pgrouting, osm2pgrouting, osmium-tool
+# south_korea PBF → 서울권 도로 토폴로지(ways/ways_vertices_pgr)
+PGPASSWORD=<db_pw> scripts/build_routing.sh
+# addr_server의 /route?from=lon,lat&to=lon,lat 가 pgr_dijkstra 로 최단경로 계산
 ```
 
 ### 4) 서버 기동

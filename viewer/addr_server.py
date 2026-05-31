@@ -10,7 +10,8 @@ import psycopg2
 
 # 가시권 시범영역(서울 북부·북한산) DEM — scripts/build_terrain_dem.py로 생성
 DEM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "terrain_dem.tif")
-VS_AREA = (126.80, 37.52, 127.15, 37.80)  # lon0,lat0,lon1,lat1
+VS_AREA = (126.80, 37.52, 127.15, 37.80)  # 가시권 DEM 영역 lon0,lat0,lon1,lat1
+RT_AREA = (126.65, 37.40, 127.25, 37.72)  # 경로탐색(서울권 도로망) 영역
 
 # 접속정보는 GIS_DSN 환경변수로 재정의 가능. 비밀번호는 PGPASSWORD/~/.pgpass 사용 권장.
 DSN = os.environ.get("GIS_DSN", "host=localhost port=5432 dbname=gis user=postgres")
@@ -84,6 +85,36 @@ class Handler(SimpleHTTPRequestHandler):
                 for f in (vt, vp, vo):
                     try: os.remove(f)
                     except Exception: pass
+            return
+        if u.path == "/route":
+            # 경로탐색: 출발/도착 좌표 → pgr_dijkstra 최단경로 GeoJSON + 거리/시간
+            qs = parse_qs(u.query)
+            try:
+                fl, ft = map(float, qs["from"][0].split(",")); tl, tt = map(float, qs["to"][0].split(","))
+            except Exception:
+                self.send_response(400); self.end_headers(); self.wfile.write(b'{"error":"from/to"}'); return
+            self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
+            for lon, lat in ((fl, ft), (tl, tt)):
+                if not (RT_AREA[0] <= lon <= RT_AREA[2] and RT_AREA[1] <= lat <= RT_AREA[3]):
+                    self.wfile.write(json.dumps({"error": "out_of_area", "msg": "경로 시범영역(서울권) 밖입니다"}, ensure_ascii=False).encode()); return
+            try:
+                con = psycopg2.connect(DSN); cur = con.cursor()
+                cur.execute(
+                    """WITH s AS (SELECT id FROM ways_vertices_pgr ORDER BY the_geom <-> ST_SetSRID(ST_Point(%s,%s),4326) LIMIT 1),
+                            e AS (SELECT id FROM ways_vertices_pgr ORDER BY the_geom <-> ST_SetSRID(ST_Point(%s,%s),4326) LIMIT 1),
+                            r AS (SELECT w.the_geom g, w.length_m, w.cost_s
+                                  FROM pgr_dijkstra('SELECT gid AS id, source, target, cost, reverse_cost FROM ways',
+                                     (SELECT id FROM s),(SELECT id FROM e)) d JOIN ways w ON d.edge=w.gid)
+                       SELECT ST_AsGeoJSON(ST_Collect(g)), COALESCE(SUM(length_m),0), COALESCE(SUM(cost_s),0) FROM r""",
+                    (fl, ft, tl, tt))
+                geom, dist, tsec = cur.fetchone(); cur.close(); con.close()
+            except Exception as ex:
+                self.wfile.write(json.dumps({"error": str(ex)}).encode()); return
+            if not geom or dist == 0:
+                self.wfile.write(json.dumps({"error": "no_route", "msg": "경로를 찾지 못했습니다"}, ensure_ascii=False).encode()); return
+            feat = {"type": "FeatureCollection", "features": [
+                {"type": "Feature", "geometry": json.loads(geom), "properties": {"dist_m": round(dist), "time_s": round(tsec)}}]}
+            self.wfile.write(json.dumps(feat, ensure_ascii=False).encode("utf-8"))
             return
         if u.path == "/poi_bbox":
             # 뷰포트(bbox) 내 POI를 GeoJSON으로 반환 → 클라이언트 클러스터링용
