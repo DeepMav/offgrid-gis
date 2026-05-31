@@ -7,6 +7,18 @@
 > 베이스맵·POI·주소·3D 건물까지 모두 로컬에서 구동되는, 가볍고 오프라인 지향의
 > 공간정보(GIS) 데모/툴킷입니다.
 
+## 미리보기
+
+서울 일대 (모든 화면은 자체 호스팅 타일 — 외부 지도 API 없음)
+
+![여의도 3D 스카이라인 + 한강 + POI](docs/screenshots/hero.jpg)
+
+| 3D 건물 클로즈업 | 전국 커버리지 |
+|---|---|
+| ![3D 건물](docs/screenshots/closeup3d.jpg) | ![전국](docs/screenshots/nationwide.jpg) |
+| **POI 카테고리 아이콘** | **장소·주소 검색** |
+| ![POI](docs/screenshots/poi.jpg) | ![검색](docs/screenshots/search.jpg) |
+
 ## 주요 기능
 
 - **오프라인 벡터 베이스맵** — OpenStreetMap → planetiler로 직접 빌드한 PMTiles, martin으로 서빙

@@ -92,6 +92,7 @@ const style = {
   ]
 };
 const map = new maplibregl.Map({ container: "map", style, center: [126.8564, 35.1345], zoom: 13.5, pitch: 50, maxPitch: 85, maxZoom: 19 });
+window.map = map;   // 스크린샷/디버그용 전역 노출
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
 map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
 map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), "bottom-right");
@@ -119,6 +120,18 @@ function go(i) { const r = items[i]; map.flyTo({center:[r.lon,r.lat],zoom:17,pit
 q.addEventListener("input", () => { clr.style.display = q.value?"block":"none"; clearTimeout(timer); timer=setTimeout(async()=>{ const v=q.value.trim(); if(!v){items=[];res.innerHTML="";return;} items=await (await fetch("/search?q="+encodeURIComponent(v))).json(); sel=-1; render(); },200); });
 q.addEventListener("keydown",(e)=>{ if(!items.length)return; if(e.key==="ArrowDown"){sel=(sel+1)%items.length;render();e.preventDefault();} else if(e.key==="ArrowUp"){sel=(sel-1+items.length)%items.length;render();e.preventDefault();} else if(e.key==="Enter"){go(sel<0?0:sel);} });
 clr.onclick=()=>{ q.value="";items=[];res.innerHTML="";clr.style.display="none";q.focus(); };
+
+// URL 파라미터로 카메라/검색 제어 (딥링크 + 스크린샷): ?lon=&lat=&z=&p=(pitch)&b=(bearing)&q=
+(function(){
+  const u = new URLSearchParams(location.search);
+  const num = (k,d)=>{ const v=parseFloat(u.get(k)); return isNaN(v)?d:v; };
+  if (["lon","lat","z","p","b"].some(k=>u.has(k))) {
+    map.jumpTo({ center:[num("lon",126.9784), num("lat",37.5666)], zoom:num("z",14), pitch:num("p",0), bearing:num("b",0) });
+  }
+  const sq = u.get("q");
+  if (sq) map.once("idle", async ()=>{ q.value=sq; clr.style.display="block";
+    try { items = await (await fetch("/search?q="+encodeURIComponent(sq))).json(); sel=0; render(); } catch(_){} });
+})();
 </script>
 </body>
 </html>
