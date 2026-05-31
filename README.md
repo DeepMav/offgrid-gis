@@ -25,9 +25,13 @@
 
 ![측정·그리기](docs/screenshots/feat_measure.jpg)
 
-| 지형 3D (음영기복) | 가시권 분석 (line-of-sight) |
+| 지형 3D (음영기복) | 가시권 — 지형 DEM (서울 북부) |
 |---|---|
 | ![지형3D](docs/screenshots/feat_terrain.jpg) | ![가시권](docs/screenshots/feat_viewshed.jpg) |
+
+가시권 — LiDAR DSM 건물 차폐 (광주): 초록 가시영역이 건물 사이 가로만 따라 흐름
+
+![가시권DSM](docs/screenshots/feat_viewshed_dsm.jpg)
 
 경로탐색 (pgRouting 최단경로)
 
@@ -42,7 +46,7 @@
 - **컨트롤 패널** — 주간/야간 베이스맵 전환, 레이어 토글(3D 건물·POI·지명), POI 카테고리 필터, POI 군집(클러스터링)
 - **측정·그리기 도구** — 거리·면적 측정(지구 타원체 보정), 선/면 그리기, 마커 주석. 외부 라이브러리 없이 구현
 - **지형 3D** — 로컬 terrain-RGB 타일로 음영기복(hillshade) + 3D 지형(MapLibre terrain)
-- **가시권 분석(viewshed)** — 관측점에서 보이는 영역을 `gdal_viewshed`로 계산해 오버레이 (통신·감시·조망 분석)
+- **가시권 분석(viewshed)** — 관측점에서 보이는 영역을 `gdal_viewshed`로 계산해 오버레이 (통신·감시·조망 분석). 서울 북부=지형 DEM, **광주=LiDAR DSM(건물 차폐 반영)**
 - **경로탐색(routing)** — pgRouting(`pgr_dijkstra`) 최단경로 + 거리·시간. 외부 라우팅 서버 없이 PostGIS 내에서 완결
 - **단일 타일서버(martin)** 로 PMTiles·PostGIS·글리프·스프라이트 통합 서빙
 
@@ -109,6 +113,9 @@ scripts/load_official_juso.sh shp <SHP경로> 5179
 # terrain-RGB → XYZ 타일(MapLibre raster-dem 용, 인코딩 보존 위해 near)
 cd viewer && gdal2tiles.py --xyz -z 11-14 -r near -w none terrain_rgb.tif terrain
 # 가시권은 addr_server의 /viewshed 가 terrain_dem.tif에 gdal_viewshed 를 실행
+
+# (선택) 건물 차폐 가시권용 고해상 DSM — 광주 LiDAR(LAS)에서 생성
+/usr/bin/python3 scripts/build_lidar_dsm.py   # → gwangju_dsm_3857.tif (1m, 건물·수목 포함)
 ```
 
 ### 3-2) (선택) 경로탐색용 도로망 적재 (pgRouting)

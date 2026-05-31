@@ -10,8 +10,10 @@ import psycopg2
 
 # 가시권 시범영역(서울 북부·북한산) DEM — scripts/build_terrain_dem.py로 생성
 DEM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "terrain_dem.tif")
-VS_AREA = (126.80, 37.52, 127.15, 37.80)  # 가시권 DEM 영역 lon0,lat0,lon1,lat1
+VS_AREA = (126.80, 37.52, 127.15, 37.80)  # 가시권 지형DEM 영역(서울 북부)
 RT_AREA = (126.65, 37.40, 127.25, 37.72)  # 경로탐색(서울권 도로망) 영역
+GW_DSM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gwangju_dsm_3857.tif")
+GW_AREA = (126.829, 35.130, 126.884, 35.139)  # 광주 LiDAR DSM(건물 차폐) 영역, EPSG:5181
 
 # 접속정보는 GIS_DSN 환경변수로 재정의 가능. 비밀번호는 PGPASSWORD/~/.pgpass 사용 권장.
 DSN = os.environ.get("GIS_DSN", "host=localhost port=5432 dbname=gis user=postgres")
@@ -64,20 +66,25 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_response(400); self.end_headers(); self.wfile.write(b'{"error":"lon/lat"}'); return
             h = float(qs.get("h", ["10"])[0]); r = float(qs.get("r", ["12000"])[0])
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
-            if not (VS_AREA[0] <= lon <= VS_AREA[2] and VS_AREA[1] <= lat <= VS_AREA[3]):
-                self.wfile.write(json.dumps({"error": "out_of_area", "msg": "가시권 시범영역(서울 북부·북한산) 밖입니다"}, ensure_ascii=False).encode()); return
+            # 영역별 DEM/DSM 선택: 광주=LiDAR DSM(건물 차폐, 5181), 서울북부=지형 DEM(3857)
             OS = 20037508.342789244
             X = lon * OS / 180.0
             Y = math.log(math.tan((90 + lat) * math.pi / 360.0)) * OS / math.pi
+            if GW_AREA[0] <= lon <= GW_AREA[2] and GW_AREA[1] <= lat <= GW_AREA[3]:
+                dem = GW_DSM; s_srs = "EPSG:3857"; mode = "DSM(건물 차폐)"   # 광주 LiDAR
+            elif VS_AREA[0] <= lon <= VS_AREA[2] and VS_AREA[1] <= lat <= VS_AREA[3]:
+                dem = DEM; s_srs = "EPSG:3857"; mode = "DEM(지형)"   # 서울 지형
+            else:
+                self.wfile.write(json.dumps({"error": "out_of_area", "msg": "가시권 시범영역(서울 북부 또는 광주 LiDAR) 밖입니다"}, ensure_ascii=False).encode()); return
             tag = os.urandom(4).hex(); vt = f"/tmp/vs_{tag}.tif"; vp = f"/tmp/vs_{tag}.geojson"; vo = f"/tmp/vs_{tag}_4326.geojson"
             try:
-                subprocess.run(["gdal_viewshed", "-md", str(r), "-oz", str(h), "-tz", "1.7", "-ox", str(X), "-oy", str(Y), DEM, vt],
-                               check=True, capture_output=True, timeout=60)
+                subprocess.run(["gdal_viewshed", "-md", str(r), "-oz", str(h), "-tz", "1.7", "-ox", str(X), "-oy", str(Y), dem, vt],
+                               check=True, capture_output=True, timeout=120)
                 subprocess.run(["gdal_polygonize.py", vt, "-b", "1", "-f", "GeoJSON", vp, "vs", "DN"],
-                               check=True, capture_output=True, timeout=60)
-                subprocess.run(["ogr2ogr", "-f", "GeoJSON", "-where", "DN=255", "-t_srs", "EPSG:4326", vo, vp],
-                               check=True, capture_output=True, timeout=60)
-                gj = json.load(open(vo))
+                               check=True, capture_output=True, timeout=120)
+                subprocess.run(["ogr2ogr", "-f", "GeoJSON", "-where", "DN=255", "-s_srs", s_srs, "-t_srs", "EPSG:4326", vo, vp],
+                               check=True, capture_output=True, timeout=120)
+                gj = json.load(open(vo)); gj["mode"] = mode
                 self.wfile.write(json.dumps(gj, ensure_ascii=False).encode("utf-8"))
             except Exception as ex:
                 self.wfile.write(json.dumps({"error": str(ex)}).encode())
