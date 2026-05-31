@@ -3,10 +3,14 @@
 COEP 없음(martin 타일 교차출처 로드 가능). /search?q=... → JSON.
 사용: python3 addr_server.py [port=8082]
 """
-import os, sys, json
+import os, sys, json, math, subprocess
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 import psycopg2
+
+# 가시권 시범영역(서울 북부·북한산) DEM — scripts/build_terrain_dem.py로 생성
+DEM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "terrain_dem.tif")
+VS_AREA = (126.80, 37.52, 127.15, 37.80)  # lon0,lat0,lon1,lat1
 
 # 접속정보는 GIS_DSN 환경변수로 재정의 가능. 비밀번호는 PGPASSWORD/~/.pgpass 사용 권장.
 DSN = os.environ.get("GIS_DSN", "host=localhost port=5432 dbname=gis user=postgres")
@@ -49,6 +53,37 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(rows, ensure_ascii=False).encode("utf-8"))
+            return
+        if u.path == "/viewshed":
+            # 가시권 분석: 관측점에서 보이는 영역 → GeoJSON (gdal_viewshed)
+            qs = parse_qs(u.query)
+            try:
+                lon = float(qs["lon"][0]); lat = float(qs["lat"][0])
+            except Exception:
+                self.send_response(400); self.end_headers(); self.wfile.write(b'{"error":"lon/lat"}'); return
+            h = float(qs.get("h", ["10"])[0]); r = float(qs.get("r", ["12000"])[0])
+            self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
+            if not (VS_AREA[0] <= lon <= VS_AREA[2] and VS_AREA[1] <= lat <= VS_AREA[3]):
+                self.wfile.write(json.dumps({"error": "out_of_area", "msg": "가시권 시범영역(서울 북부·북한산) 밖입니다"}, ensure_ascii=False).encode()); return
+            OS = 20037508.342789244
+            X = lon * OS / 180.0
+            Y = math.log(math.tan((90 + lat) * math.pi / 360.0)) * OS / math.pi
+            tag = os.urandom(4).hex(); vt = f"/tmp/vs_{tag}.tif"; vp = f"/tmp/vs_{tag}.geojson"; vo = f"/tmp/vs_{tag}_4326.geojson"
+            try:
+                subprocess.run(["gdal_viewshed", "-md", str(r), "-oz", str(h), "-tz", "1.7", "-ox", str(X), "-oy", str(Y), DEM, vt],
+                               check=True, capture_output=True, timeout=60)
+                subprocess.run(["gdal_polygonize.py", vt, "-b", "1", "-f", "GeoJSON", vp, "vs", "DN"],
+                               check=True, capture_output=True, timeout=60)
+                subprocess.run(["ogr2ogr", "-f", "GeoJSON", "-where", "DN=255", "-t_srs", "EPSG:4326", vo, vp],
+                               check=True, capture_output=True, timeout=60)
+                gj = json.load(open(vo))
+                self.wfile.write(json.dumps(gj, ensure_ascii=False).encode("utf-8"))
+            except Exception as ex:
+                self.wfile.write(json.dumps({"error": str(ex)}).encode())
+            finally:
+                for f in (vt, vp, vo):
+                    try: os.remove(f)
+                    except Exception: pass
             return
         if u.path == "/poi_bbox":
             # 뷰포트(bbox) 내 POI를 GeoJSON으로 반환 → 클라이언트 클러스터링용
