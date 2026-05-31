@@ -29,7 +29,7 @@
 |---|---|
 | ![지형3D](docs/screenshots/feat_terrain.jpg) | ![가시권](docs/screenshots/feat_viewshed.jpg) |
 
-가시권 — LiDAR DSM 건물 차폐 (광주): 초록 가시영역이 건물 사이 가로만 따라 흐름
+가시권 — LiDAR DSM 건물 차폐 (광주): 관측점에서 보이는 영역(빨강)이 도로를 따라 뻗고, 건물 뒤는 비가시
 
 ![가시권DSM](docs/screenshots/feat_viewshed_dsm.jpg)
 

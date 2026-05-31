@@ -305,8 +305,8 @@ map.on("load", () => {
   // ── 가시권 분석 (서버 gdal_viewshed) ──
   let vsMarker = null;
   map.addSource("vs", { type:"geojson", data:{type:"FeatureCollection",features:[]} });
-  map.addLayer({ id:"vs-fill", type:"fill", source:"vs", paint:{ "fill-color":"#2ecc71", "fill-opacity":0.35 } });
-  map.addLayer({ id:"vs-line", type:"line", source:"vs", paint:{ "line-color":"#1e9e54", "line-width":1.2 } });
+  map.addLayer({ id:"vs-fill", type:"fill", source:"vs", paint:{ "fill-color":"#ff3b1d", "fill-opacity":0.42 } });
+  map.addLayer({ id:"vs-line", type:"line", source:"vs", paint:{ "line-color":"#b81800", "line-width":1.2 } });
   async function runViewshed(lng, lat) {
     measureEl.style.display="block"; measureEl.innerHTML="가시권 계산 중…";
     try {
@@ -314,7 +314,7 @@ map.on("load", () => {
       if (gj.error) { measureEl.textContent = gj.msg || ("오류: "+gj.error); map.getSource("vs").setData({type:"FeatureCollection",features:[]}); if(vsMarker){vsMarker.remove();vsMarker=null;} return; }
       map.getSource("vs").setData(gj);
       if (vsMarker) vsMarker.remove();
-      vsMarker = new maplibregl.Marker({color:"#e74c3c"}).setLngLat([lng,lat]).addTo(map);
+      vsMarker = new maplibregl.Marker({color:"#1d4ed8"}).setLngLat([lng,lat]).addTo(map);
       measureEl.innerHTML = `가시권(초록)${gj.mode?" · <b>"+gj.mode+"</b>":""} — 관측높이 10m`;
     } catch(_) { measureEl.textContent = "가시권 요청 실패"; }
   }
