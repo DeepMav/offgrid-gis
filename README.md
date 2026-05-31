@@ -9,6 +9,10 @@
 
 ## 미리보기
 
+**건물 차폐 가시권 (광주, LiDAR DSM)** — 3D 회전: 빨강 가시영역이 건물 사이 도로를 따라 흐르고 건물 뒤는 가려짐
+
+![가시권 3D 회전](docs/gif/gwangju_viewshed_3d.gif)
+
 서울 일대 (모든 화면은 자체 호스팅 타일 — 외부 지도 API 없음)
 
 ![여의도 3D 스카이라인 + 한강 + POI](docs/screenshots/hero.jpg)
