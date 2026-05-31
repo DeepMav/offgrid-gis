@@ -28,6 +28,9 @@
   .seg button { flex: 1; padding: 5px; border: 1px solid #ccc; background: #fff; cursor: pointer; font: 11px sans-serif; }
   .seg button.on { background: #333; color: #fff; border-color: #333; }
   .seg button:first-child { border-radius: 6px 0 0 6px; } .seg button:last-child { border-radius: 0 6px 6px 0; border-left: 0; }
+  #draw-clear { width: 100%; margin-top: 5px; padding: 5px; border: 1px solid #d33; background: #fff; color: #d33; border-radius: 6px; cursor: pointer; font: 11px sans-serif; }
+  #measure { display: none; margin-top: 6px; padding: 5px 7px; background: #fff7e6; border: 1px solid #f0c070; border-radius: 6px; color: #8a5a00; font-size: 11px; }
+  #measure b { color: #b35900; }
 </style>
 <script src="./node_modules/maplibre-gl/dist/maplibre-gl.js"></script>
 </head>
@@ -44,6 +47,10 @@
   <label><input type="checkbox" id="t-cluster"> POI 군집(클러스터)</label>
   <h4>POI 카테고리</h4>
   <div id="cats"></div>
+  <h4>도구 (측정·그리기)</h4>
+  <div class="seg" id="tools"><button data-d="line">거리</button><button data-d="poly">면적</button><button data-d="point">주석</button></div>
+  <button id="draw-clear">지우기</button>
+  <div id="measure"></div>
 </div>
 <div id="hud">전국 PostGIS 지도 · martin · OSM(ODbL)</div>
 <script>
@@ -121,9 +128,10 @@ map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "
 map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), "bottom-right");
 
 function popup(lngLat, html) { new maplibregl.Popup().setLngLat(lngLat).setHTML(html).addTo(map); }
-map.on("click", "poi-bg", (e) => { const p = e.features[0].properties; popup(e.lngLat, `<b>${p.name||"(이름없음)"}</b><br><span style="color:#888">${p.cat||""}</span>`); });
+map.on("click", "poi-bg", (e) => { if (drawMode) return; const p = e.features[0].properties; popup(e.lngLat, `<b>${p.name||"(이름없음)"}</b><br><span style="color:#888">${p.cat||""}</span>`); });
 // 건물 클릭 → 주소 + 높이 (단일 팝업). 광주(bld-3d) 우선, 없으면 전국(korea-3d).
 map.on("click", (e) => {
+  if (drawMode) return;   // 측정·그리기 중엔 건물 팝업 비활성
   const f = map.queryRenderedFeatures(e.point, { layers: ["poi-bg","bld-3d","korea-3d"] });
   if (!f.length) return;
   if (f.some(x => x.layer.id === "poi-bg")) return;   // POI 클릭은 POI 핸들러가 처리(중복 방지)
@@ -135,8 +143,15 @@ map.on("click", (e) => {
 });
 ["poi-bg","bld-3d","korea-3d"].forEach(l => { map.on("mouseenter", l, () => map.getCanvas().style.cursor="pointer"); map.on("mouseleave", l, () => map.getCanvas().style.cursor=""); });
 
-// ── 컨트롤 패널: 베이스맵 테마 / 레이어 토글 / POI 카테고리 / 클러스터 ──
-let clusterOn = false;
+// ── 컨트롤 패널: 베이스맵 테마 / 레이어 토글 / POI 카테고리 / 클러스터 / 측정·그리기 ──
+let clusterOn = false, drawMode = null;
+// 측정 헬퍼 (외부 의존성 없음, 지구 타원체 근사)
+function haversine(a,b){ const R=6371000,r=Math.PI/180; const dLa=(b[1]-a[1])*r,dLo=(b[0]-a[0])*r,la1=a[1]*r,la2=b[1]*r; const h=Math.sin(dLa/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLo/2)**2; return 2*R*Math.asin(Math.sqrt(h)); }
+function lineLen(c){ let s=0; for(let i=1;i<c.length;i++) s+=haversine(c[i-1],c[i]); return s; }
+function ringArea(c){ if(c.length<3) return 0; const R=6378137,r=Math.PI/180; let a=0; for(let i=0;i<c.length;i++){ const p=c[i],q=c[(i+1)%c.length]; a+=(q[0]-p[0])*r*(2+Math.sin(p[1]*r)+Math.sin(q[1]*r)); } return Math.abs(a*R*R/2); }
+function centroid(c){ let x=0,y=0; c.forEach(p=>{x+=p[0];y+=p[1];}); return [x/c.length,y/c.length]; }
+function fmtD(m){ return m>=1000?(m/1000).toFixed(2)+" km":Math.round(m)+" m"; }
+function fmtA(m){ return m>=1e6?(m/1e6).toFixed(2)+" km²":Math.round(m).toLocaleString()+" m²"; }
 const K3D = ["interpolate",["linear"],["coalesce",["get","render_height"],6],3,"#e6dcc8",25,"#d4b89a",70,"#bd9678"];
 const B3D = ["interpolate",["linear"],["get","height"],3,"#cdd6cf",20,"#c4b8a6",45,"#b09a82"];
 const THEME = {
@@ -214,6 +229,57 @@ map.on("load", () => {
     setVis(["poi-bg","poi-symbol"], !clusterOn && $("t-poi").checked);   // 중복 방지
     if (clusterOn) refreshClusters();
   };
+
+  // ── 측정 / 그리기 / 주석 ──
+  const measureEl = $("measure");
+  let dpts = [];
+  const dedupe = (c) => c.filter((p,i)=> i===0 || p[0]!==c[i-1][0] || p[1]!==c[i-1][1]);
+  const drawFC = { type:"FeatureCollection", features:[] };
+  map.addSource("draw", { type:"geojson", data:drawFC });
+  map.addSource("drawing", { type:"geojson", data:{type:"FeatureCollection",features:[]} });
+  map.addLayer({ id:"draw-poly", type:"fill", source:"draw", filter:["==",["geometry-type"],"Polygon"], paint:{"fill-color":"#1a73e8","fill-opacity":0.14} });
+  map.addLayer({ id:"draw-poly-ln", type:"line", source:"draw", filter:["==",["geometry-type"],"Polygon"], paint:{"line-color":"#1a73e8","line-width":2} });
+  map.addLayer({ id:"draw-line", type:"line", source:"draw", filter:["==",["geometry-type"],"LineString"], paint:{"line-color":"#1a73e8","line-width":2.5} });
+  map.addLayer({ id:"drawing-fill", type:"fill", source:"drawing", filter:["==",["geometry-type"],"Polygon"], paint:{"fill-color":"#e8731a","fill-opacity":0.1} });
+  map.addLayer({ id:"drawing-line", type:"line", source:"drawing", paint:{"line-color":"#e8731a","line-width":2,"line-dasharray":[2,1]} });
+  map.addLayer({ id:"draw-pt", type:"circle", source:"draw", filter:["all",["==",["geometry-type"],"Point"],["==",["get","kind"],"anno"]], paint:{"circle-radius":5,"circle-color":"#e8731a","circle-stroke-color":"#fff","circle-stroke-width":2} });
+  map.addLayer({ id:"draw-label", type:"symbol", source:"draw", filter:["has","label"], layout:{"text-field":["get","label"],"text-font":FONT,"text-size":12,"text-anchor":"top","text-offset":[0,0.5]}, paint:{"text-color":"#0b3d91","text-halo-color":"#fff","text-halo-width":2} });
+
+  function previewGeom(cursor){
+    let c = dedupe(cursor ? dpts.concat([cursor]) : dpts.slice());
+    if (drawMode==="line" && c.length>=2) return { f:{type:"Feature",geometry:{type:"LineString",coordinates:c},properties:{}}, txt:"거리 "+fmtD(lineLen(c)) };
+    if (drawMode==="poly" && c.length>=3){ const ring=c.concat([c[0]]); return { f:{type:"Feature",geometry:{type:"Polygon",coordinates:[ring]},properties:{}}, txt:"면적 "+fmtA(ringArea(c))+" · 둘레 "+fmtD(lineLen(ring)) }; }
+    if (drawMode==="poly" && c.length===2) return { f:{type:"Feature",geometry:{type:"LineString",coordinates:c},properties:{}}, txt:"둘레 "+fmtD(lineLen(c)) };
+    return { f:null, txt:"" };
+  }
+  function refreshPreview(cursor){
+    const {f,txt} = previewGeom(cursor);
+    map.getSource("drawing").setData(f?{type:"FeatureCollection",features:[f]}:{type:"FeatureCollection",features:[]});
+    measureEl.innerHTML = txt ? txt.replace(/([\d.,]+ (?:km²|km|m²|m))/g,"<b>$1</b>") : "";
+    measureEl.style.display = txt ? "block" : "none";
+  }
+  function finishDraw(){
+    const c = dedupe(dpts);
+    if (drawMode==="line" && c.length>=2){ drawFC.features.push({type:"Feature",geometry:{type:"LineString",coordinates:c},properties:{}}); drawFC.features.push({type:"Feature",geometry:{type:"Point",coordinates:c[Math.floor(c.length/2)]},properties:{kind:"meas",label:fmtD(lineLen(c))}}); }
+    else if (drawMode==="poly" && c.length>=3){ const ring=c.concat([c[0]]); drawFC.features.push({type:"Feature",geometry:{type:"Polygon",coordinates:[ring]},properties:{}}); drawFC.features.push({type:"Feature",geometry:{type:"Point",coordinates:centroid(c)},properties:{kind:"meas",label:fmtA(ringArea(c))}}); }
+    map.getSource("draw").setData(drawFC); dpts=[]; refreshPreview();
+  }
+  map.on("click", (e) => {
+    if (!drawMode) return;
+    if (drawMode==="point"){ const t=prompt("주석 텍스트:",""); if(t!==null){ drawFC.features.push({type:"Feature",geometry:{type:"Point",coordinates:[e.lngLat.lng,e.lngLat.lat]},properties:{kind:"anno",label:t||"📍"}}); map.getSource("draw").setData(drawFC); } return; }
+    dpts.push([e.lngLat.lng,e.lngLat.lat]); refreshPreview();
+  });
+  map.on("mousemove", (e) => { if (drawMode && drawMode!=="point" && dpts.length) refreshPreview([e.lngLat.lng,e.lngLat.lat]); });
+  map.on("dblclick", () => { if (drawMode && drawMode!=="point") finishDraw(); });
+  document.addEventListener("keydown", (e) => { if(!drawMode) return; if(e.key==="Enter") finishDraw(); else if(e.key==="Escape"){ dpts=[]; refreshPreview(); } });
+  function setMode(m){
+    drawMode = (drawMode===m) ? null : m; dpts=[]; refreshPreview();
+    document.querySelectorAll("#tools button").forEach(b=>b.classList.toggle("on", b.dataset.d===drawMode));
+    map.getCanvas().style.cursor = drawMode ? "crosshair" : "";
+    drawMode ? map.doubleClickZoom.disable() : map.doubleClickZoom.enable();
+  }
+  document.querySelectorAll("#tools button").forEach(b=> b.onclick=()=>setMode(b.dataset.d));
+  $("draw-clear").onclick=()=>{ drawFC.features=[]; map.getSource("draw").setData(drawFC); dpts=[]; refreshPreview(); };
 });
 
 // 검색 (키보드 ↑↓ Enter, 지우기)

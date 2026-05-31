@@ -21,6 +21,10 @@
 | **야간 테마 (3D)** | **POI 군집(클러스터링)** |
 | ![야간](docs/screenshots/feat_night.jpg) | ![클러스터](docs/screenshots/feat_cluster.jpg) |
 
+거리·면적 측정 + 그리기/주석
+
+![측정·그리기](docs/screenshots/feat_measure.jpg)
+
 ## 주요 기능
 
 - **오프라인 벡터 베이스맵** — OpenStreetMap → planetiler로 직접 빌드한 PMTiles, martin으로 서빙
@@ -28,6 +32,7 @@
 - **3D 건물** — MapLibre `fill-extrusion`. 전국(OSM 추정높이) + 일부 도시는 LiDAR 실측높이
 - **건물 클릭 → 주소·높이 팝업**, POI 카테고리 아이콘·색상(Maki, CC0)
 - **컨트롤 패널** — 주간/야간 베이스맵 전환, 레이어 토글(3D 건물·POI·지명), POI 카테고리 필터, POI 군집(클러스터링)
+- **측정·그리기 도구** — 거리·면적 측정(지구 타원체 보정), 선/면 그리기, 마커 주석. 외부 라이브러리 없이 구현
 - **단일 타일서버(martin)** 로 PMTiles·PostGIS·글리프·스프라이트 통합 서빙
 
 ## 아키텍처
