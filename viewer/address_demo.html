@@ -310,12 +310,12 @@ map.on("load", () => {
   async function runViewshed(lng, lat) {
     measureEl.style.display="block"; measureEl.innerHTML="가시권 계산 중…";
     try {
-      const gj = await (await fetch(`/viewshed?lon=${lng}&lat=${lat}&h=10&r=12000`)).json();
+      const gj = await (await fetch(`/viewshed?lon=${lng}&lat=${lat}&h=1.7&r=12000`)).json();
       if (gj.error) { measureEl.textContent = gj.msg || ("오류: "+gj.error); map.getSource("vs").setData({type:"FeatureCollection",features:[]}); if(vsMarker){vsMarker.remove();vsMarker=null;} return; }
       map.getSource("vs").setData(gj);
       if (vsMarker) vsMarker.remove();
       vsMarker = new maplibregl.Marker({color:"#1d4ed8"}).setLngLat([lng,lat]).addTo(map);
-      measureEl.innerHTML = `가시권(빨강)${gj.mode?" · <b>"+gj.mode+"</b>":""} — 관측높이 10m`;
+      measureEl.innerHTML = `가시권(빨강)${gj.mode?" · <b>"+gj.mode+"</b>":""} — 관측높이 1.7m(사람 눈높이)`;
     } catch(_) { measureEl.textContent = "가시권 요청 실패"; }
   }
 
