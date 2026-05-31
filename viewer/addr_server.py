@@ -14,6 +14,7 @@ VS_AREA = (126.80, 37.52, 127.15, 37.80)  # 가시권 지형DEM 영역(서울 �
 RT_AREA = (126.65, 37.40, 127.25, 37.72)  # 경로탐색(서울권 도로망) 영역
 GW_DSM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gwangju_dsm_3857.tif")
 GW_AREA = (126.829, 35.130, 126.884, 35.139)  # 광주 LiDAR DSM(건물 차폐) 영역, EPSG:5181
+SNAP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "viewshed_snap_ground.py")
 
 # 접속정보는 GIS_DSN 환경변수로 재정의 가능. 비밀번호는 PGPASSWORD/~/.pgpass 사용 권장.
 DSN = os.environ.get("GIS_DSN", "host=localhost port=5432 dbname=gis user=postgres")
@@ -72,6 +73,13 @@ class Handler(SimpleHTTPRequestHandler):
             Y = math.log(math.tan((90 + lat) * math.pi / 360.0)) * OS / math.pi
             if GW_AREA[0] <= lon <= GW_AREA[2] and GW_AREA[1] <= lat <= GW_AREA[3]:
                 dem = GW_DSM; s_srs = "EPSG:3857"; mode = "DSM(건물 차폐)"   # 광주 LiDAR
+                try:   # 관측점이 건물/수목 위면 가장 가까운 지면으로 스냅
+                    o = subprocess.run(["/usr/bin/python3", SNAP, str(lon), str(lat)],
+                                       capture_output=True, text=True, timeout=30).stdout.split()
+                    X, Y = float(o[0]), float(o[1])
+                    if len(o) > 2 and o[2] == "1": mode += " · 지면 보정"
+                except Exception:
+                    pass   # 실패 시 기본 좌표 사용
             elif VS_AREA[0] <= lon <= VS_AREA[2] and VS_AREA[1] <= lat <= VS_AREA[3]:
                 dem = DEM; s_srs = "EPSG:3857"; mode = "DEM(지형)"   # 서울 지형
             else:
