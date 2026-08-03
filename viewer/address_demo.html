@@ -31,6 +31,29 @@
   #draw-clear { width: 100%; margin-top: 5px; padding: 5px; border: 1px solid #d33; background: #fff; color: #d33; border-radius: 6px; cursor: pointer; font: 11px sans-serif; }
   #measure { display: none; margin-top: 6px; padding: 5px 7px; background: #fff7e6; border: 1px solid #f0c070; border-radius: 6px; color: #8a5a00; font-size: 11px; }
   #measure b { color: #b35900; }
+  /* 가시권 도구 — 관측 조건 설정 + 결과 카드 */
+  #vs-opts { display: none; margin-top: 6px; }
+  #vs-opts .row { margin: 5px 0; }
+  #vs-opts .row > span { display: block; color: #667; font-size: 10px; margin-bottom: 3px; letter-spacing: .3px; }
+  .seg.sm button { padding: 4px 2px; font-size: 10px; }
+  #vs-hint { margin-top: 6px; padding: 5px 7px; background: #eef6ff; border: 1px solid #b9d5f2;
+             border-radius: 6px; color: #14539a; font-size: 11px; }
+  #vs-out { position: fixed; left: 10px; bottom: 34px; z-index: 6; width: 300px; font: 12px sans-serif;
+            background: rgba(255,255,255,.96); border-radius: 9px; box-shadow: 0 2px 10px rgba(0,0,0,.25);
+            padding: 10px 12px 11px; display: none; border-top: 3px solid #12b886; }
+  #vs-out .t { font-size: 10px; letter-spacing: .6px; color: #667; font-weight: 700; }
+  #vs-out .big { font-size: 26px; font-weight: 700; color: #0b3d2c; line-height: 1.15; margin: 3px 0 1px;
+                 font-variant-numeric: tabular-nums; }
+  #vs-out .big small { font-size: 13px; font-weight: 600; color: #4a6b5e; margin-left: 3px; }
+  #vs-out .bar { height: 7px; border-radius: 4px; background: #223; margin: 6px 0 5px; overflow: hidden; }
+  #vs-out .bar i { display: block; height: 100%; background: #12b886; }
+  #vs-out .m { color: #556; font-size: 11px; line-height: 1.6; }
+  #vs-out .m b { color: #0b3d2c; font-variant-numeric: tabular-nums; }
+  #vs-out .lg { margin-top: 7px; padding-top: 7px; border-top: 1px solid #e6e9e6; color: #667; font-size: 10.5px; }
+  #vs-out .sw { display: inline-block; width: 11px; height: 11px; border-radius: 2px; vertical-align: -2px; margin-right: 4px; }
+  #vs-out .sw.vis { background: #25e0b0; border: 1px solid #0f9b7c; }
+  #vs-out .sw.blind { background: #2b3440; border: 1px solid #10161d; margin-left: 10px; }
+  #vs-out .sw.obs { background: #ff3b30; border: 1px solid #a01810; border-radius: 50%; margin-left: 10px; }
 </style>
 <script src="./node_modules/maplibre-gl/dist/maplibre-gl.js"></script>
 </head>
@@ -50,8 +73,25 @@
   <div id="cats"></div>
   <h4>도구 (측정·그리기)</h4>
   <div class="seg" id="tools"><button data-d="line">거리</button><button data-d="poly">면적</button><button data-d="point">주석</button><button data-d="viewshed">가시권</button><button data-d="route">경로</button></div>
+  <div id="vs-opts">
+    <div class="row"><span>관측 높이 (지표 기준)</span>
+      <div class="seg sm" id="vs-h"><button data-h="1.7">1.7 m</button><button data-h="30">30 m</button><button data-h="100" class="on">100 m</button><button data-h="300">300 m</button></div>
+    </div>
+    <div class="row"><span>분석 반경</span>
+      <div class="seg sm" id="vs-r"><button data-r="2000">2 km</button><button data-r="5000" class="on">5 km</button><button data-r="10000">10 km</button></div>
+    </div>
+    <div id="vs-hint">지도를 클릭해 관측점을 지정하세요</div>
+  </div>
   <button id="draw-clear">지우기</button>
   <div id="measure"></div>
+</div>
+<div id="vs-out">
+  <div class="t">가시권 분석</div>
+  <div class="big"><span id="vs-area">—</span><small>km² 가시</small></div>
+  <div class="bar"><i id="vs-bar" style="width:0"></i></div>
+  <div class="m" id="vs-ratio"></div>
+  <div class="m" id="vs-cond"></div>
+  <div class="lg"><span class="sw vis"></span>보이는 곳<span class="sw blind"></span>가려진 곳<span class="sw obs"></span>관측점</div>
 </div>
 <div id="hud">전국 PostGIS 지도 · martin · OSM(ODbL)</div>
 <script>
@@ -125,7 +165,8 @@ const style = {
 const map = new maplibregl.Map({ container: "map", style, center: [126.8564, 35.1345], zoom: 13.5, pitch: 50, maxPitch: 85, maxZoom: 19 });
 window.map = map;   // 스크린샷/디버그용 전역 노출
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
-map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
+// 축척은 오른쪽 아래로 — 왼쪽 아래는 가시권 결과 카드가 차지한다
+map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-right");
 map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), "bottom-right");
 
 function popup(lngLat, html) { new maplibregl.Popup().setLngLat(lngLat).setHTML(html).addTo(map); }
@@ -282,11 +323,12 @@ map.on("load", () => {
   function setMode(m){
     drawMode = (drawMode===m) ? null : m; dpts=[]; routeStart=null; refreshPreview();
     document.querySelectorAll("#tools button").forEach(b=>b.classList.toggle("on", b.dataset.d===drawMode));
+    $("vs-opts").style.display = drawMode==="viewshed" ? "block" : "none";
     map.getCanvas().style.cursor = drawMode ? "crosshair" : "";
     drawMode ? map.doubleClickZoom.disable() : map.doubleClickZoom.enable();
   }
   document.querySelectorAll("#tools button").forEach(b=> b.onclick=()=>setMode(b.dataset.d));
-  $("draw-clear").onclick=()=>{ drawFC.features=[]; map.getSource("draw").setData(drawFC); dpts=[]; refreshPreview(); if(vsMarker){vsMarker.remove();vsMarker=null;} map.getSource("vs").setData({type:"FeatureCollection",features:[]}); clearRoute(); };
+  $("draw-clear").onclick=()=>{ drawFC.features=[]; map.getSource("draw").setData(drawFC); dpts=[]; refreshPreview(); map.getSource("vs").setData({type:"FeatureCollection",features:[]}); map.getSource("vsmask").setData({type:"FeatureCollection",features:[]}); map.getSource("vsobs").setData({type:"FeatureCollection",features:[]}); $("vs-out").style.display="none"; clearRoute(); };
 
   // ── 지형 3D (로컬 terrain-RGB 타일, 서울 북부 시범영역) ──
   $("t-terrain").onchange = (e) => {
@@ -303,21 +345,80 @@ map.on("load", () => {
   };
 
   // ── 가시권 분석 (서버 gdal_viewshed) ──
-  let vsMarker = null;
+  // 반경 원을 어둡게 깔고 그 위에 보이는 영역만 밝게 올린다 = 사각지대가 곧바로 읽힌다.
+  // (가려진 영역을 폴리곤 차집합으로 만들지 않아도 같은 결과를 눈으로 얻는다)
+  let vsH = 100, vsR = 5000;
+  map.addSource("vsmask", { type:"geojson", data:{type:"FeatureCollection",features:[]} });
   map.addSource("vs", { type:"geojson", data:{type:"FeatureCollection",features:[]} });
-  map.addLayer({ id:"vs-fill", type:"fill", source:"vs", paint:{ "fill-color":"#ff3b1d", "fill-opacity":0.42 } });
-  map.addLayer({ id:"vs-line", type:"line", source:"vs", paint:{ "line-color":"#b81800", "line-width":1.2 } });
-  async function runViewshed(lng, lat) {
-    measureEl.style.display="block"; measureEl.innerHTML="가시권 계산 중…";
-    try {
-      const gj = await (await fetch(`/viewshed?lon=${lng}&lat=${lat}&h=1.7&r=4000`)).json();
-      if (gj.error) { measureEl.textContent = gj.msg || ("오류: "+gj.error); map.getSource("vs").setData({type:"FeatureCollection",features:[]}); if(vsMarker){vsMarker.remove();vsMarker=null;} return; }
-      map.getSource("vs").setData(gj);
-      if (vsMarker) vsMarker.remove();
-      vsMarker = new maplibregl.Marker({color:"#1d4ed8"}).setLngLat([lng,lat]).addTo(map);
-      measureEl.innerHTML = `가시권(빨강)${gj.mode?" · <b>"+gj.mode+"</b>":""} — 눈높이 1.7m · 최대 4km`;
-    } catch(_) { measureEl.textContent = "가시권 요청 실패"; }
+  map.addLayer({ id:"vs-mask", type:"fill", source:"vsmask", paint:{ "fill-color":"#111a24", "fill-opacity":0.52 } });
+  map.addLayer({ id:"vs-fill", type:"fill", source:"vs", paint:{ "fill-color":"#25e0b0", "fill-opacity":0.62 } });
+  map.addLayer({ id:"vs-line", type:"line", source:"vs", paint:{ "line-color":"#eafff8", "line-width":0.7, "line-opacity":0.55 } });
+  map.addLayer({ id:"vs-ring", type:"line", source:"vsmask", paint:{ "line-color":"#ffffff", "line-width":1.6, "line-dasharray":[3,2], "line-opacity":0.9 } });
+  // 관측점은 마커 대신 레이어로 — 3D 지형 위에서도 가려지지 않고 라벨을 함께 붙일 수 있다
+  map.addSource("vsobs", { type:"geojson", data:{type:"FeatureCollection",features:[]} });
+  map.addLayer({ id:"vs-obs", type:"circle", source:"vsobs",
+    paint:{ "circle-radius":7, "circle-color":"#ff3b30", "circle-stroke-color":"#fff", "circle-stroke-width":2.5 } });
+  map.addLayer({ id:"vs-obs-label", type:"symbol", source:"vsobs",
+    layout:{ "text-field":["get","label"], "text-font":FONT, "text-size":12.5, "text-anchor":"bottom", "text-offset":[0,-1.1], "text-allow-overlap":true },
+    paint:{ "text-color":"#a30d05", "text-halo-color":"#fff", "text-halo-width":2.2 } });
+
+  // 관측점 중심 반경 원(측지 근사) — 마스크와 가시율 분모로 쓴다
+  function circlePoly(lng, lat, radius, steps=180){
+    const R=6378137, ring=[];
+    for(let i=0;i<=steps;i++){
+      const b=2*Math.PI*i/steps, d=radius/R;
+      const la=Math.asin(Math.sin(lat*Math.PI/180)*Math.cos(d)+Math.cos(lat*Math.PI/180)*Math.sin(d)*Math.cos(b));
+      const lo=lng*Math.PI/180+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(lat*Math.PI/180), Math.cos(d)-Math.sin(lat*Math.PI/180)*Math.sin(la));
+      ring.push([lo*180/Math.PI, la*180/Math.PI]);
+    }
+    return { type:"Feature", geometry:{ type:"Polygon", coordinates:[ring] }, properties:{} };
   }
+  // 구멍(hole)까지 반영한 전체 면적
+  function fcArea(gj){
+    let a=0;
+    for (const f of (gj.features||[])){
+      const g=f.geometry; if(!g) continue;
+      const polys = g.type==="Polygon" ? [g.coordinates] : g.type==="MultiPolygon" ? g.coordinates : [];
+      for (const rings of polys) rings.forEach((r,i)=> a += (i===0?1:-1)*ringArea(r));
+    }
+    return a;
+  }
+
+  async function runViewshed(lng, lat) {
+    const out=$("vs-out"); out.style.display="block";
+    $("vs-hint").textContent = "관측점을 다시 클릭하면 그 지점으로 재계산합니다";
+    $("vs-area").textContent="…"; $("vs-bar").style.width="0";
+    $("vs-ratio").textContent="계산 중"; $("vs-cond").textContent="";
+    const circle = circlePoly(lng, lat, vsR);
+    map.getSource("vsmask").setData({type:"FeatureCollection",features:[circle]});
+    const t0 = performance.now();
+    try {
+      const gj = await (await fetch(`/viewshed?lon=${lng}&lat=${lat}&h=${vsH}&r=${vsR}`)).json();
+      const ms = performance.now()-t0;
+      if (gj.error) {
+        $("vs-area").textContent="—"; $("vs-ratio").textContent = gj.msg || ("오류: "+gj.error); $("vs-cond").textContent="";
+        map.getSource("vs").setData({type:"FeatureCollection",features:[]});
+        map.getSource("vsmask").setData({type:"FeatureCollection",features:[]});
+        map.getSource("vsobs").setData({type:"FeatureCollection",features:[]}); return;
+      }
+      map.getSource("vs").setData(gj);
+      map.getSource("vsobs").setData({ type:"FeatureCollection", features:[
+        { type:"Feature", geometry:{type:"Point",coordinates:[lng,lat]},
+          properties:{ label:`관측점 · 지표 +${vsH} m` } }]});
+      const vis = fcArea(gj), tot = ringArea(circle.geometry.coordinates[0]);
+      const pct = tot ? Math.min(100, vis/tot*100) : 0;
+      $("vs-area").textContent = (vis/1e6).toFixed(2);
+      $("vs-bar").style.width = pct.toFixed(1)+"%";
+      $("vs-ratio").innerHTML = `반경 ${(vsR/1000)} km 원 <b>${(tot/1e6).toFixed(1)}</b> km² 중 <b>${pct.toFixed(1)}%</b> · 사각 <b>${((tot-vis)/1e6).toFixed(1)}</b> km²`;
+      $("vs-cond").innerHTML = `관측 <b>+${vsH} m</b> · 대상 <b>1.7 m</b> · ${gj.mode||"DEM"} · 계산 <b>${(ms/1000).toFixed(2)} s</b>`;
+      // 가시권은 지형 차폐가 핵심이라 3D 지형을 함께 켠다
+      if (!map.getTerrain() && $("t-terrain")) { $("t-terrain").checked = true; $("t-terrain").onchange({target:$("t-terrain")}); }
+    } catch(_) { $("vs-area").textContent="—"; $("vs-ratio").textContent="가시권 요청 실패"; }
+  }
+  document.querySelectorAll("#vs-h button").forEach(b=> b.onclick=()=>{
+    vsH=+b.dataset.h; document.querySelectorAll("#vs-h button").forEach(x=>x.classList.toggle("on",x===b)); });
+  document.querySelectorAll("#vs-r button").forEach(b=> b.onclick=()=>{
+    vsR=+b.dataset.r; document.querySelectorAll("#vs-r button").forEach(x=>x.classList.toggle("on",x===b)); });
 
   // ── 경로탐색 (pgRouting, 서울권 도로망) ──
   let routeStart=null, routeSM=null, routeEM=null;
